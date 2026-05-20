@@ -1,0 +1,24 @@
+{
+  "titles": {
+    "daily": "线上办公数据汇总",
+    "monthly": "当月累计汇总",
+    "hijack_office": "劫持汇总",
+    "hijack_hr": "劫持人事汇总"
+  },
+  "schedule": {
+    "daily_push_time": "21:07"
+  },
+  "sections": {
+    "daily_table": true,
+    "monthly_table": true,
+    "hijack_office": true,
+    "hijack_hr": true,
+    "dod_comparison": true,
+    "anomaly_alerts": true,
+    "fraud_alerts": false,
+    "price_summary": true
+  },
+  "triggers": {
+    "keywords": ["推送", "数据", "push", "更新", "查看", "发", "给我", "查", "要", "整个"]
+  }
+}

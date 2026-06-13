@@ -10,7 +10,6 @@ import json, urllib.request, time, os, sys
 from urllib.parse import urlparse, parse_qs
 from flask import Flask, request, jsonify
 import psycopg2
-import psycopg2.extras
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║              配置区 — 环境变量 + 常量                        ║
@@ -25,11 +24,11 @@ BOT_USERNAME = "PH90WFH_Bonus_bot"
 # 【2.5】管理员 Telegram ID 列表
 ADMIN_IDS = [5228288204, 7393739670]
 
-# 【3】允许的推广域名
-ALLOWED_DOMAINS = ["90jilia2.com", "www.90jilia2.com"]
+# 【3】允许的推广域名（逗号分隔，环境变量 ALLOWED_DOMAINS）
+ALLOWED_DOMAINS = [d.strip() for d in os.environ.get("ALLOWED_DOMAINS", "").split(",") if d.strip()]
 
-# 【4】奖励名称
-DEFAULT_REWARD = "Free Spins + Signup Bonus"
+# 【4】奖励名称（环境变量 DEFAULT_REWARD）
+DEFAULT_REWARD = os.environ.get("DEFAULT_REWARD", "Free Spins + Signup Bonus")
 
 # 【5】Render 部署后给的 URL — 设为环境变量，部署时填
 RENDER_APP_URL = os.environ.get("RENDER_APP_URL", "")
@@ -182,7 +181,10 @@ def db_global_stats():
         week_players = c.fetchone()[0]
         c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at>=date_trunc('month',CURRENT_DATE)")
         month_players = c.fetchone()[0]
-        c.execute("SELECT ref_code, first_name, invite_count FROM users WHERE role='agent' AND status='active' ORDER BY invite_count DESC LIMIT 10")
+        c.execute("""SELECT a.ref_code, a.first_name, COUNT(p.telegram_id) as pc
+                     FROM users a LEFT JOIN users p ON p.ref_code = a.ref_code AND p.role = 'player'
+                     WHERE a.role = 'agent' AND a.status = 'active'
+                     GROUP BY a.ref_code, a.first_name ORDER BY pc DESC LIMIT 10""")
         top = c.fetchall()
         return {
             "total_agents": total_agents, "active_agents": active_agents,
@@ -269,10 +271,8 @@ def parse_promo_url(s):
     if not s.startswith("http"): return None, "URL must start with http:// or https://"
     try: p = urlparse(s)
     except: return None, "Invalid URL format"
-    if p.netloc.lower() not in ALLOWED_DOMAINS and "your-domain" not in p.netloc:
-        # Only strict check if domains are configured
-        if "【" not in ALLOWED_DOMAINS[0]:
-            return None, f"Domain not allowed: {ALLOWED_DOMAINS}"
+    if ALLOWED_DOMAINS and p.netloc.lower() not in ALLOWED_DOMAINS:
+        return None, f"Domain not allowed. Allowed: {', '.join(ALLOWED_DOMAINS)}"
     qs = parse_qs(p.query)
     rc = qs.get("r", [None])[0]
     if not rc: return None, "Missing ?r= parameter"
@@ -344,7 +344,7 @@ def handle_start(msg):
         else:
             send(cid, f"<b>🤖 PH90 WFH Bonus Bot</b>\n\n👤 Hi {fname}!\n\n"
                  f"🎰 Get <b>{DEFAULT_REWARD}</b> through a referral link!\n\n"
-                 f"<b>For Agents:</b>\n/bind http://www.your-domain.com/?r=your_code\n\n"
+                 f"<b>For Agents:</b>\n/bind your_promo_link\n\n"
                  f"❓ Contact your agent for more info.")
 
 def handle_deep_link(cid, uid, uname, fname, ref_id):
@@ -368,7 +368,7 @@ def handle_deep_link(cid, uid, uname, fname, ref_id):
          f"<b>👇 3 Steps:</b>\n1️⃣ Tap below to register\n2️⃣ Get Free Spins + Bonus\n"
          f"3️⃣ Share the link with friends!\n\n{pl}\n\n📢 <b>Unlimited Sharing!</b>",
          reply_markup={"inline_keyboard":[[{"text":"🎮 Register & Claim",
-            "url":agent.get("promo_url","https://your-domain.com")}]]})
+            "url":agent.get("promo_url","https://t.me")}]]})
 
 def handle_bind(msg):
     chat = msg.get("chat",{}); frm = msg.get("from",{})
@@ -378,8 +378,7 @@ def handle_bind(msg):
     parts = text.split(maxsplit=1)
     if len(parts)<2:
         return send(cid, "<b>⚠️ Please provide your promo link</b>\n\n"
-                    "Format: /bind http://www.your-domain.com/?r=your_code\n\n"
-                    "<i>Example: /bind http://www.your-domain.com/?r=YOUR_CODE</i>")
+                    "Format: /bind http://your-platform.com/?r=your_code")
     rc, result = parse_promo_url(parts[1].strip())
     if not rc: return send(cid, f"<b>❌ Bind Failed</b>\n\n{result}")
     conn = None

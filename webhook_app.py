@@ -557,12 +557,29 @@ def process_update(update):
 def home():
     return "PH90 WFH Bonus Bot — 24/7 Cloud 🚀"
 
+@app.route("/debug")
+def debug():
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users")
+        count = c.fetchone()[0]
+        conn.close()
+        return jsonify({"db": "ok", "user_count": count, "admin_ids": ADMIN_IDS})
+    except Exception as e:
+        return jsonify({"db": "error", "detail": str(e)})
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     update = request.get_json()
     if update:
-        try: process_update(update)
-        except Exception as e: print(f"[ERROR] {e}")
+        try:
+            process_update(update)
+        except Exception as e:
+            import traceback
+            print(f"[ERROR] {e}")
+            traceback.print_exc()
+            return jsonify({"ok": False, "error": str(e)})
     return jsonify({"ok": True})
 
 # ── Startup ─────────────────────────────────────────────────────

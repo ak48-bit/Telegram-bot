@@ -594,16 +594,20 @@ def set_webhook():
     print(f"[WEBHOOK] {url} → {'OK' if ok else result}")
     return ok
 
-if __name__ == "__main__":
-    print("[INIT] Connecting to Supabase PostgreSQL...")
-    try:
-        init_db()
-        print("[INIT] Database ready")
-    except Exception as e:
-        print(f"[INIT] DB ERROR: {e}")
-        print("[INIT] Check DATABASE_URL in webhook_app.py")
+# 初始化数据库（gunicorn 不发 __main__，所以放外面）
+print("[INIT] Connecting to Supabase PostgreSQL...")
+try:
+    init_db()
+    print("[INIT] Database ready")
+except Exception as e:
+    print(f"[INIT] DB ERROR: {e}")
 
+# 获取 RENDER_APP_URL 并设置 webhook
+RENDER_APP_URL = os.environ.get("RENDER_APP_URL", "")
+if RENDER_APP_URL:
     set_webhook()
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"[START] Listening on port {port}")
     app.run(host="0.0.0.0", port=port)

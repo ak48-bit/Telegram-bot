@@ -16,8 +16,8 @@ import psycopg2.extras
 # ║              【部署前只改这6处，其他不动】                    ║
 # ╚══════════════════════════════════════════════════════════════╝
 
-# 【1】Bot Token — @BotFather 给的
-BOT_TOKEN = "8328734578:AAGlSQXuiSQ-25dOW8rsx0sIfOX0oNLEJ8c"
+# 【1】Bot Token — 从环境变量读取（Render → Environment）
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 
 # 【2】Bot 用户名 — 不要 @
 BOT_USERNAME = "PH90WFH_Bonus_bot"
@@ -34,9 +34,8 @@ DEFAULT_REWARD = "Free Spins + Signup Bonus"
 # 【5】Render 部署后给的 URL — 设为环境变量，部署时填
 RENDER_APP_URL = os.environ.get("RENDER_APP_URL", "")
 
-# 【6】Supabase 数据库连接 URL — 设为环境变量，部署时填
-#     从 Supabase → Settings → Database → Connection string → URI
-DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://postgres.yxiqarrjrzporgejgpdj:Aa112233aa1122@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres"
+# 【6】Supabase 数据库连接 URL — 从环境变量读取（Render → Environment）
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                     ★ 以上全改 ★                            ║
@@ -67,144 +66,193 @@ def is_admin(uid):
     return uid in ADMIN_IDS
 
 def init_db():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            telegram_id BIGINT PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            role TEXT DEFAULT 'player',
-            ref_code TEXT,
-            promo_url TEXT,
-            invited_by BIGINT,
-            invite_count INTEGER DEFAULT 0,
-            notify INTEGER DEFAULT 1,
-            status TEXT DEFAULT 'active',
-            created_at TIMESTAMP DEFAULT NOW()
-        )
-    ''')
-    # 兼容旧表：添加 status 列（如果不存在）
+    conn = None
     try:
-        c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'")
-    except:
-        pass
-    conn.commit()
-    conn.close()
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                telegram_id BIGINT PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                role TEXT DEFAULT 'player',
+                ref_code TEXT,
+                promo_url TEXT,
+                invited_by BIGINT,
+                invite_count INTEGER DEFAULT 0,
+                notify INTEGER DEFAULT 1,
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT NOW()
+            )
+        ''')
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'")
+        except:
+            pass
+        conn.commit()
+    finally:
+        if conn: conn.close()
 
 def db_get_user(tid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE telegram_id=%s", (tid,))
-    row = c.fetchone()
-    conn.close()
-    if row:
-        cols = ["telegram_id","username","first_name","role","ref_code",
-                "promo_url","invited_by","invite_count","notify","status","created_at"]
-        return dict(zip(cols, row))
-    return None
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE telegram_id=%s", (tid,))
+        row = c.fetchone()
+        if row:
+            cols = ["telegram_id","username","first_name","role","ref_code",
+                    "promo_url","invited_by","invite_count","notify","status","created_at"]
+            return dict(zip(cols, row))
+        return None
+    finally:
+        if conn: conn.close()
 
 def db_upsert_user(tid, **kw):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT 1 FROM users WHERE telegram_id=%s", (tid,))
-    ex = c.fetchone()
-    if ex:
-        if not kw: conn.close(); return
-        sets = ", ".join(f"{k}=%s" for k in kw)
-        c.execute(f"UPDATE users SET {sets} WHERE telegram_id=%s",
-                  list(kw.values())+[tid])
-    else:
-        kw["telegram_id"] = tid
-        c.execute(f"INSERT INTO users ({','.join(kw.keys())}) VALUES ({','.join('%s' for _ in kw)})",
-                  list(kw.values()))
-    conn.commit(); conn.close()
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT 1 FROM users WHERE telegram_id=%s", (tid,))
+        ex = c.fetchone()
+        if ex:
+            if not kw: return
+            sets = ", ".join(f"{k}=%s" for k in kw)
+            c.execute(f"UPDATE users SET {sets} WHERE telegram_id=%s",
+                      list(kw.values())+[tid])
+        else:
+            kw["telegram_id"] = tid
+            c.execute(f"INSERT INTO users ({','.join(kw.keys())}) VALUES ({','.join('%s' for _ in kw)})",
+                      list(kw.values()))
+        conn.commit()
+    finally:
+        if conn: conn.close()
 
 def db_incr_invite(tid):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE users SET invite_count=COALESCE(invite_count,0)+1 WHERE telegram_id=%s", (tid,))
-    conn.commit(); conn.close()
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("UPDATE users SET invite_count=COALESCE(invite_count,0)+1 WHERE telegram_id=%s", (tid,))
+        conn.commit()
+    finally:
+        if conn: conn.close()
 
 def db_players(ref_code, limit=999):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT telegram_id,username,first_name,invited_by,created_at FROM users WHERE ref_code=%s AND role='player' ORDER BY created_at DESC LIMIT %s", (ref_code, limit))
-    rows = c.fetchall(); conn.close()
-    return [{"telegram_id":r[0],"username":r[1],"first_name":r[2],
-             "invited_by":r[3],"created_at":str(r[4])} for r in rows]
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT telegram_id,username,first_name,invited_by,created_at FROM users WHERE ref_code=%s AND role='player' ORDER BY created_at DESC LIMIT %s", (ref_code, limit))
+        rows = c.fetchall()
+        return [{"telegram_id":r[0],"username":r[1],"first_name":r[2],
+                 "invited_by":r[3],"created_at":str(r[4])} for r in rows]
+    finally:
+        if conn: conn.close()
 
 def db_today_count(ref_code):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at::date=CURRENT_DATE", (ref_code,))
-    row = c.fetchone(); conn.close()
-    return row[0] if row else 0
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at::date=CURRENT_DATE", (ref_code,))
+        row = c.fetchone()
+        return row[0] if row else 0
+    finally:
+        if conn: conn.close()
 
 def db_global_stats():
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users WHERE role='agent'")
-    total_agents = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM users WHERE role='agent' AND status='active'")
-    active_agents = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM users WHERE role='agent' AND status='pending'")
-    pending_agents = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM users WHERE role='player'")
-    total_players = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at::date=CURRENT_DATE")
-    today_players = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at>=date_trunc('week',CURRENT_DATE)")
-    week_players = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at>=date_trunc('month',CURRENT_DATE)")
-    month_players = c.fetchone()[0]
-    c.execute("SELECT ref_code, first_name, invite_count FROM users WHERE role='agent' AND status='active' ORDER BY invite_count DESC LIMIT 10")
-    top = c.fetchall()
-    conn.close()
-    return {
-        "total_agents": total_agents, "active_agents": active_agents,
-        "pending_agents": pending_agents, "total_players": total_players,
-        "today_players": today_players, "week_players": week_players,
-        "month_players": month_players, "top": top
-    }
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users WHERE role='agent'")
+        total_agents = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE role='agent' AND status='active'")
+        active_agents = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE role='agent' AND status='pending'")
+        pending_agents = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE role='player'")
+        total_players = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at::date=CURRENT_DATE")
+        today_players = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at>=date_trunc('week',CURRENT_DATE)")
+        week_players = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at>=date_trunc('month',CURRENT_DATE)")
+        month_players = c.fetchone()[0]
+        c.execute("SELECT ref_code, first_name, invite_count FROM users WHERE role='agent' AND status='active' ORDER BY invite_count DESC LIMIT 10")
+        top = c.fetchall()
+        return {
+            "total_agents": total_agents, "active_agents": active_agents,
+            "pending_agents": pending_agents, "total_players": total_players,
+            "today_players": today_players, "week_players": week_players,
+            "month_players": month_players, "top": top
+        }
+    finally:
+        if conn: conn.close()
 
 def db_all_agent_ids():
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT telegram_id FROM users WHERE role='agent' AND status='active'")
-    rows = c.fetchall(); conn.close()
-    return [r[0] for r in rows]
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT telegram_id FROM users WHERE role='agent' AND status='active'")
+        rows = c.fetchall()
+        return [r[0] for r in rows]
+    finally:
+        if conn: conn.close()
 
 def db_week_count(ref_code):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at>=date_trunc('week',CURRENT_DATE)", (ref_code,))
-    row = c.fetchone(); conn.close()
-    return row[0] if row else 0
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at>=date_trunc('week',CURRENT_DATE)", (ref_code,))
+        row = c.fetchone()
+        return row[0] if row else 0
+    finally:
+        if conn: conn.close()
 
 def db_month_count(ref_code):
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at>=date_trunc('month',CURRENT_DATE)", (ref_code,))
-    row = c.fetchone(); conn.close()
-    return row[0] if row else 0
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at>=date_trunc('month',CURRENT_DATE)", (ref_code,))
+        row = c.fetchone()
+        return row[0] if row else 0
+    finally:
+        if conn: conn.close()
 
 def db_approve_agent(ref_code):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE users SET status='active' WHERE ref_code=%s AND role='agent'", (ref_code,))
-    affected = c.rowcount; conn.commit(); conn.close()
-    return affected > 0
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("UPDATE users SET status='active' WHERE ref_code=%s AND role='agent'", (ref_code,))
+        affected = c.rowcount; conn.commit()
+        return affected > 0
+    finally:
+        if conn: conn.close()
 
 def db_ban_agent(ref_code):
-    conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE users SET status='banned' WHERE ref_code=%s AND role='agent'", (ref_code,))
-    affected = c.rowcount; conn.commit(); conn.close()
-    return affected > 0
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("UPDATE users SET status='banned' WHERE ref_code=%s AND role='agent'", (ref_code,))
+        affected = c.rowcount; conn.commit()
+        return affected > 0
+    finally:
+        if conn: conn.close()
 
 def db_find_agent(player_id):
     seen = set(); cur = player_id
-    conn = get_db(); c = conn.cursor()
-    while cur and cur not in seen:
-        seen.add(cur)
-        c.execute("SELECT * FROM users WHERE telegram_id=%s", (cur,))
-        row = c.fetchone()
-        if not row: conn.close(); return None
-        cols = ["telegram_id","username","first_name","role","ref_code",
-                "promo_url","invited_by","invite_count","notify","status","created_at"]
-        if u["role"] == "agent": conn.close(); return u
-        cur = u.get("invited_by")
-    conn.close(); return None
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        while cur and cur not in seen:
+            seen.add(cur)
+            c.execute("SELECT * FROM users WHERE telegram_id=%s", (cur,))
+            row = c.fetchone()
+            if not row: return None
+            cols = ["telegram_id","username","first_name","role","ref_code",
+                    "promo_url","invited_by","invite_count","notify","status","created_at"]
+            u = dict(zip(cols, row))
+            if u["role"] == "agent": return u
+            cur = u.get("invited_by")
+        return None
+    finally:
+        if conn: conn.close()
 
 # ── URL Parser ──────────────────────────────────────────────────
 
@@ -321,9 +369,13 @@ def handle_bind(msg):
                     "<i>Example: /bind http://www.your-domain.com/?r=YOUR_CODE</i>")
     rc, result = parse_promo_url(parts[1].strip())
     if not rc: return send(cid, f"<b>❌ Bind Failed</b>\n\n{result}")
-    conn = get_db(); c = conn.cursor()
-    c.execute("SELECT telegram_id,first_name FROM users WHERE ref_code=%s AND telegram_id!=%s", (rc,uid))
-    conflict = c.fetchone(); conn.close()
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT telegram_id,first_name FROM users WHERE ref_code=%s AND telegram_id!=%s", (rc,uid))
+        conflict = c.fetchone()
+    finally:
+        if conn: conn.close()
     if conflict: return send(cid, f"<b>⚠️ Ref Code Already Taken</b>\n\n"
                              f"<code>{rc}</code> already bound by {conflict[1]}.")
     db_upsert_user(uid, username=uname, first_name=fname, role="agent",
@@ -559,15 +611,17 @@ def home():
 
 @app.route("/debug")
 def debug():
+    conn = None
     try:
         conn = get_db()
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM users")
         count = c.fetchone()[0]
-        conn.close()
         return jsonify({"db": "ok", "user_count": count, "admin_ids": ADMIN_IDS})
     except Exception as e:
         return jsonify({"db": "error", "detail": str(e)})
+    finally:
+        if conn: conn.close()
 
 @app.route("/webhook", methods=["POST"])
 def webhook():

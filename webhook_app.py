@@ -36,7 +36,7 @@ RENDER_APP_URL = os.environ.get("RENDER_APP_URL", "")
 
 # 【6】Supabase 数据库连接 URL — 设为环境变量，部署时填
 #     从 Supabase → Settings → Database → Connection string → URI
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("DATABASE_URL") or "postgresql://postgres.yxiqarrjrzporgejgpdj:Aa112233aa1122@aws-1-ap-southeast-1.pooler.supabase.com:6543/postgres"
 
 # ╔══════════════════════════════════════════════════════════════╗
 # ║                     ★ 以上全改 ★                            ║

@@ -1,8 +1,8 @@
-__pycache__/
-*.pyc
-push_history_*.md
-LATEST_PUSH.md
-LATEST_PUSH_EN.md
-bot_log.txt
-*.jsonl
-.claude/
+﻿# Ignore everything
+*
+
+# Except deployment files
+!webhook_app.py
+!requirements.txt
+!Procfile
+!.gitignore

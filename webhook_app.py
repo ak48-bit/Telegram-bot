@@ -13,7 +13,7 @@ import psycopg2
 import psycopg2.extras
 
 # ╔══════════════════════════════════════════════════════════════╗
-# ║              【部署前只改这6处，其他不动】                    ║
+# ║              配置区 — 环境变量 + 常量                        ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 # 【1】Bot Token — 从环境变量读取（Render → Environment）
@@ -37,8 +37,11 @@ RENDER_APP_URL = os.environ.get("RENDER_APP_URL", "")
 # 【6】Supabase 数据库连接 URL — 从环境变量读取（Render → Environment）
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
+# 【7】Webhook Secret Token — 防止伪造消息
+SECRET_TOKEN = os.environ.get("SECRET_TOKEN", "ph90_bonus_bot_2026")
+
 # ╔══════════════════════════════════════════════════════════════╗
-# ║                     ★ 以上全改 ★                            ║
+# ║                     配置区结束                              ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 PAGE_SIZE = 30
@@ -87,6 +90,11 @@ def init_db():
         ''')
         try:
             c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'")
+        except:
+            pass
+        # 确保 agent 的 ref_code 唯一（空字符串除外）
+        try:
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_agent_ref ON users(ref_code) WHERE ref_code IS NOT NULL AND ref_code != '' AND role = 'agent'")
         except:
             pass
         conn.commit()
@@ -272,14 +280,19 @@ def parse_promo_url(s):
 
 # ── Telegram API ────────────────────────────────────────────────
 
-def tg(method, payload=None):
+def tg(method, payload=None, retries=3):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     data = json.dumps(payload, ensure_ascii=False).encode() if payload else None
-    req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.loads(r.read().decode())
-    except: return None
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, data=data, headers={"Content-Type":"application/json"})
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return json.loads(r.read().decode())
+        except Exception as e:
+            if attempt == retries - 1:
+                print(f"[TG ERROR] {method}: {e}")
+                return None
+            time.sleep(1)
 
 def send(chat_id, text, pm="HTML", markup=None):
     p = {"chat_id":chat_id,"text":text,"parse_mode":pm,"disable_web_page_preview":True}
@@ -382,6 +395,11 @@ def handle_bind(msg):
                    ref_code=rc, promo_url=result, status="pending")
     link = f"https://t.me/{BOT_USERNAME}?start={uid}"
     tgd = f"@{uname}" if uname else f"ID:{uid}"
+    # 通知所有管理员
+    for aid in ADMIN_IDS:
+        send(aid, f"<b>🔔 New Agent Registration</b>\n\n"
+             f"👤 {fname} — {tgd}\n🏷️ Ref: <code>{rc}</code>\n\n"
+             f"<i>Use /approve {rc} to activate</i>")
     send(cid, f"<b>✅ Bind Successful! — Awaiting Approval</b>\n\n👤 {fname}\n📱 Telegram: {tgd}\n"
          f"🏷️ Ref: <code>{rc}</code>\n🔗 Reg: {result}\n\n"
          f"<b>⏳ Status: Pending Review</b>\n"
@@ -413,18 +431,41 @@ def handle_my(msg):
              f"{ai}\n📊 Invited: {u.get('invite_count',0)}\n📢 Share:\n{link}\n\n"
              f"<b>Commands:</b> /my /share /help")
 
-def handle_players(msg, page=1):
+def handle_players(msg, page=1, search=None):
     chat = msg.get("chat",{}); frm = msg.get("from",{})
     cid = chat.get("id"); uid = frm.get("id")
     u = db_get_user(uid)
     if not u or u.get("role")!="agent": return send(cid, "Only agents. /bind first.")
+    # 解析命令: /players [keyword] [page]
+    text = msg.get("text","").strip()
+    parts = text.split()
+    if search is None and len(parts) >= 2:
+        # 尝试从命令参数提取搜索词或页码
+        arg = parts[1]
+        try:
+            # 纯数字 = 页码
+            page = int(arg)
+            if len(parts) >= 3:
+                search = " ".join(parts[2:])
+        except ValueError:
+            # 非数字 = 搜索词
+            search = " ".join(parts[1:])
+            if len(parts) >= 2:
+                try: page = int(parts[-1])
+                except: page = 1
     rc = u["ref_code"]; all_p = db_players(rc)
+    if search:
+        s = search.lower()
+        all_p = [p for p in all_p if s in (p.get("first_name") or "").lower() or s in (p.get("username") or "").lower() or s in str(p.get("telegram_id",""))]
     total = len(all_p); tp = max(1,(total+PAGE_SIZE-1)//PAGE_SIZE); page = max(1,min(page,tp))
     if total==0:
+        hint = f"No players matching '{search}'." if search else "No players yet."
         return send(cid, f"<b>📋 Player List</b>\n\n🏷️ Ref: <code>{rc}</code>\n"
-                    f"📊 No players yet.\n\n<i>Send your Share Link!</i>")
+                    f"📊 {hint}\n\n<i>Send your Share Link!</i>")
     start = (page-1)*PAGE_SIZE; pp = all_p[start:start+PAGE_SIZE]
-    lines = [f"<b>📋 Player List — {rc}</b>", f"📊 Total: {total}  |  Page {page}/{tp}\n"]
+    title = f"<b>📋 Player List — {rc}</b>"
+    if search: title += f" 🔍 \"{search}\""
+    lines = [title, f"📊 Total: {total}  |  Page {page}/{tp}\n"]
     for i,p in enumerate(pp, start+1):
         nm = p["first_name"] or "Anonymous"; tgi = p["telegram_id"]
         tg = f"@{p['username']}" if p.get("username") else f"ID:{tgi}"
@@ -465,12 +506,12 @@ def handle_help(msg):
     chat = msg.get("chat",{}); cid = chat.get("id")
     uid = msg.get("from",{}).get("id")
     base = ("<b>📋 Commands</b>\n\n<b>Agents:</b>\n/bind &lt;link&gt; — Bind promo link\n"
-            "/my — Stats\n/players — Player list\n/share — Promo text\n/daily — Today\n\n"
+            "/my — Stats\n/players [name] — Player list (search by name)\n/share — Promo text\n/daily — Today\n\n"
             "<b>Everyone:</b>\n/start — Start\n/top — Leaderboard\n/help — Help")
     if is_admin(uid):
         base += ("\n\n<b>🔧 Admin:</b>\n/admin — Dashboard\n/approve &lt;code&gt; — Approve agent\n"
                  "/ban &lt;code&gt; — Ban agent\n/unban &lt;code&gt; — Unban agent\n"
-                 "/broadcast &lt;msg&gt; — Message all agents")
+                 "/broadcast &lt;msg&gt; — Message all agents\n/export — Export agent data")
     send(cid, base)
 
 # ── Admin Commands ──────────────────────────────────────────────
@@ -559,6 +600,36 @@ def handle_unban(msg):
     else:
         send(cid, f"❌ Agent <code>{ref_code}</code> not found.")
 
+def handle_export(msg):
+    chat = msg.get("chat",{}); frm = msg.get("from",{})
+    cid = chat.get("id"); uid = frm.get("id")
+    if not is_admin(uid):
+        return send(cid, "⛔ Admin only.")
+    conn = None
+    try:
+        conn = get_db(); c = conn.cursor()
+        c.execute("SELECT ref_code, first_name, invite_count, status, created_at FROM users WHERE role='agent' ORDER BY invite_count DESC")
+        rows = c.fetchall()
+    finally:
+        if conn: conn.close()
+    if not rows:
+        return send(cid, "No agents yet.")
+    lines = [f"<b>📋 Agent Export — {time.strftime('%Y-%m-%d %H:%M')}</b>\n"]
+    lines.append("<pre>")
+    lines.append(f"{'Ref':<12} {'Name':<16} {'Invites':>7} {'Status':<10} {'Since'}")
+    lines.append("-" * 65)
+    for rc, name, cnt, st, ca in rows:
+        ts = str(ca)[:10] if ca else "-"
+        lines.append(f"{rc:<12} {(name or '-')[:15]:<16} {cnt or 0:>7} {(st or 'active'):<10} {ts}")
+    lines.append("</pre>")
+    full = "\n".join(lines)
+    if len(full) > 4000:
+        # 分段发送
+        for i in range(0, len(lines), 40):
+            send(cid, "\n".join(lines[i:i+40]), pm="HTML")
+    else:
+        send(cid, full)
+
 def handle_top(msg):
     chat = msg.get("chat",{}); frm = msg.get("from",{})
     cid = chat.get("id")
@@ -594,6 +665,7 @@ def process_update(update):
         elif text.startswith("/ban"): handle_ban(msg)
         elif text.startswith("/unban"): handle_unban(msg)
         elif text.startswith("/top"): handle_top(msg)
+        elif text.startswith("/export"): handle_export(msg)
     elif "callback_query" in update:
         cb = update["callback_query"]; data = cb.get("data",""); cbid = cb.get("id")
         cbmsg = cb.get("message",{}); cbfrm = cb.get("from",{})
@@ -617,7 +689,7 @@ def debug():
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM users")
         count = c.fetchone()[0]
-        return jsonify({"db": "ok", "user_count": count, "admin_ids": ADMIN_IDS})
+        return jsonify({"db": "ok", "user_count": count})
     except Exception as e:
         return jsonify({"db": "error", "detail": str(e)})
     finally:
@@ -625,6 +697,9 @@ def debug():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    # 验证 Telegram Secret Token
+    if request.headers.get("X-Telegram-Bot-Api-Secret-Token") != SECRET_TOKEN:
+        return jsonify({"ok": False, "error": "unauthorized"}), 403
     update = request.get_json()
     if update:
         try:
@@ -643,7 +718,7 @@ def set_webhook():
         print("[WEBHOOK] RENDER_APP_URL env var not set yet")
         return False
     url = f"{RENDER_APP_URL}/webhook"
-    result = tg("setWebhook", {"url": url, "drop_pending_updates": True})
+    result = tg("setWebhook", {"url": url, "secret_token": SECRET_TOKEN, "drop_pending_updates": True})
     ok = result and result.get("ok")
     print(f"[WEBHOOK] {url} → {'OK' if ok else result}")
     return ok
@@ -656,8 +731,7 @@ try:
 except Exception as e:
     print(f"[INIT] DB ERROR: {e}")
 
-# 获取 RENDER_APP_URL 并设置 webhook
-RENDER_APP_URL = os.environ.get("RENDER_APP_URL", "")
+# 启动时设置 webhook
 if RENDER_APP_URL:
     set_webhook()
 

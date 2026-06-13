@@ -440,19 +440,15 @@ def handle_players(msg, page=1, search=None):
     text = msg.get("text","").strip()
     parts = text.split()
     if search is None and len(parts) >= 2:
-        # 尝试从命令参数提取搜索词或页码
-        arg = parts[1]
+        # 检查最后一个参数是否为页码
         try:
-            # 纯数字 = 页码
-            page = int(arg)
+            last_is_page = int(parts[-1])
+            page = last_is_page
             if len(parts) >= 3:
-                search = " ".join(parts[2:])
+                search = " ".join(parts[1:-1])
         except ValueError:
-            # 非数字 = 搜索词
+            # 最后不是数字，全部作为搜索词
             search = " ".join(parts[1:])
-            if len(parts) >= 2:
-                try: page = int(parts[-1])
-                except: page = 1
     rc = u["ref_code"]; all_p = db_players(rc)
     if search:
         s = search.lower()
@@ -473,8 +469,9 @@ def handle_players(msg, page=1, search=None):
     btns = []
     if tp>1:
         row = []
-        if page>1: row.append({"text":"◀ Prev","callback_data":f"players_{rc}_{page-1}"})
-        if page<tp: row.append({"text":"Next ▶","callback_data":f"players_{rc}_{page+1}"})
+        search_suffix = f"_{search[:20]}" if search else ""
+        if page>1: row.append({"text":"◀ Prev","callback_data":f"players_{rc}_{page-1}{search_suffix}"})
+        if page<tp: row.append({"text":"Next ▶","callback_data":f"players_{rc}_{page+1}{search_suffix}"})
         if row: btns.append(row)
     send(cid, "\n".join(lines), reply_markup={"inline_keyboard":btns} if btns else None)
 
@@ -614,19 +611,22 @@ def handle_export(msg):
         if conn: conn.close()
     if not rows:
         return send(cid, "No agents yet.")
-    lines = [f"<b>📋 Agent Export — {time.strftime('%Y-%m-%d %H:%M')}</b>\n"]
-    lines.append("<pre>")
-    lines.append(f"{'Ref':<12} {'Name':<16} {'Invites':>7} {'Status':<10} {'Since'}")
-    lines.append("-" * 65)
+    header = [f"<b>📋 Agent Export — {time.strftime('%Y-%m-%d %H:%M')}</b>\n"]
+    header.append("<pre>")
+    header.append(f"{'Ref':<12} {'Name':<16} {'Invites':>7} {'Status':<10} {'Since'}")
+    header.append("-" * 65)
+    rows_list = []
     for rc, name, cnt, st, ca in rows:
         ts = str(ca)[:10] if ca else "-"
-        lines.append(f"{rc:<12} {(name or '-')[:15]:<16} {cnt or 0:>7} {(st or 'active'):<10} {ts}")
-    lines.append("</pre>")
-    full = "\n".join(lines)
+        rows_list.append(f"{rc:<12} {(name or '-')[:15]:<16} {cnt or 0:>7} {(st or 'active'):<10} {ts}")
+    footer = ["</pre>"]
+    full = "\n".join(header + rows_list + footer)
     if len(full) > 4000:
-        # 分段发送
-        for i in range(0, len(lines), 40):
-            send(cid, "\n".join(lines[i:i+40]), pm="HTML")
+        # 分段发送，每段都包 <pre>
+        chunk_size = 35
+        for i in range(0, len(rows_list), chunk_size):
+            chunk = header + rows_list[i:i+chunk_size] + footer
+            send(cid, "\n".join(chunk), pm="HTML")
     else:
         send(cid, full)
 
@@ -670,9 +670,11 @@ def process_update(update):
         cb = update["callback_query"]; data = cb.get("data",""); cbid = cb.get("id")
         cbmsg = cb.get("message",{}); cbfrm = cb.get("from",{})
         if data.startswith("players_"):
-            parts = data.split("_")
-            if len(parts)>=3:
-                handle_players({"chat":cbmsg.get("chat"),"from":cbfrm}, page=int(parts[-1]))
+            parts = data.split("_", 3)  # players, rc, page, [search]
+            if len(parts) >= 3:
+                pg = int(parts[2])
+                srch = parts[3] if len(parts) > 3 and parts[3] else None
+                handle_players({"chat":cbmsg.get("chat"),"from":cbfrm}, page=pg, search=srch)
         answer_cb(cbid)
 
 # ── Flask Routes ────────────────────────────────────────────────

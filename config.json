@@ -15,10 +15,32 @@
     "hijack_hr": true,
     "dod_comparison": true,
     "anomaly_alerts": true,
-    "fraud_alerts": false,
+    "fraud_alerts": true,
     "price_summary": true
   },
+  "inactive_platforms": ["PH09-2", "PH05", "PH16", "BD02"],
+  "bots": {
+    "push": {
+      "username": "@WFHDPbot",
+      "purpose": "数据推送"
+    },
+    "bonus": {
+      "username": "@PH90WFH_Bonus_bot",
+      "purpose": "人员推广"
+    }
+  },
   "triggers": {
-    "keywords": ["推送", "数据", "push", "更新", "查看", "发", "给我", "查", "要", "整个"]
+    "keywords": [
+      "推送",
+      "数据",
+      "push",
+      "更新",
+      "查看",
+      "发",
+      "给我",
+      "查",
+      "要",
+      "整个"
+    ]
   }
 }

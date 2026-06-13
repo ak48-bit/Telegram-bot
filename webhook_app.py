@@ -22,6 +22,9 @@ BOT_TOKEN = "8328734578:AAGlSQXuiSQ-25dOW8rsx0sIfOX0oNLEJ8c"
 # 【2】Bot 用户名 — 不要 @
 BOT_USERNAME = "PH90WFH_Bonus_bot"
 
+# 【2.5】管理员 Telegram ID 列表
+ADMIN_IDS = [5228288204, 7393739670]
+
 # 【3】允许的推广域名
 ALLOWED_DOMAINS = ["90jilia2.com", "www.90jilia2.com"]
 
@@ -60,6 +63,9 @@ def get_db():
     """Connect to Supabase PostgreSQL."""
     return psycopg2.connect(DATABASE_URL)
 
+def is_admin(uid):
+    return uid in ADMIN_IDS
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -74,9 +80,15 @@ def init_db():
             invited_by BIGINT,
             invite_count INTEGER DEFAULT 0,
             notify INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
             created_at TIMESTAMP DEFAULT NOW()
         )
     ''')
+    # 兼容旧表：添加 status 列（如果不存在）
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'")
+    except:
+        pass
     conn.commit()
     conn.close()
 
@@ -87,7 +99,7 @@ def db_get_user(tid):
     conn.close()
     if row:
         cols = ["telegram_id","username","first_name","role","ref_code",
-                "promo_url","invited_by","invite_count","notify","created_at"]
+                "promo_url","invited_by","invite_count","notify","status","created_at"]
         return dict(zip(cols, row))
     return None
 
@@ -124,6 +136,62 @@ def db_today_count(ref_code):
     row = c.fetchone(); conn.close()
     return row[0] if row else 0
 
+def db_global_stats():
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users WHERE role='agent'")
+    total_agents = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE role='agent' AND status='active'")
+    active_agents = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE role='agent' AND status='pending'")
+    pending_agents = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE role='player'")
+    total_players = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at::date=CURRENT_DATE")
+    today_players = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at>=date_trunc('week',CURRENT_DATE)")
+    week_players = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE role='player' AND created_at>=date_trunc('month',CURRENT_DATE)")
+    month_players = c.fetchone()[0]
+    c.execute("SELECT ref_code, first_name, invite_count FROM users WHERE role='agent' AND status='active' ORDER BY invite_count DESC LIMIT 10")
+    top = c.fetchall()
+    conn.close()
+    return {
+        "total_agents": total_agents, "active_agents": active_agents,
+        "pending_agents": pending_agents, "total_players": total_players,
+        "today_players": today_players, "week_players": week_players,
+        "month_players": month_players, "top": top
+    }
+
+def db_all_agent_ids():
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT telegram_id FROM users WHERE role='agent' AND status='active'")
+    rows = c.fetchall(); conn.close()
+    return [r[0] for r in rows]
+
+def db_week_count(ref_code):
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at>=date_trunc('week',CURRENT_DATE)", (ref_code,))
+    row = c.fetchone(); conn.close()
+    return row[0] if row else 0
+
+def db_month_count(ref_code):
+    conn = get_db(); c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users WHERE ref_code=%s AND role='player' AND created_at>=date_trunc('month',CURRENT_DATE)", (ref_code,))
+    row = c.fetchone(); conn.close()
+    return row[0] if row else 0
+
+def db_approve_agent(ref_code):
+    conn = get_db(); c = conn.cursor()
+    c.execute("UPDATE users SET status='active' WHERE ref_code=%s AND role='agent'", (ref_code,))
+    affected = c.rowcount; conn.commit(); conn.close()
+    return affected > 0
+
+def db_ban_agent(ref_code):
+    conn = get_db(); c = conn.cursor()
+    c.execute("UPDATE users SET status='banned' WHERE ref_code=%s AND role='agent'", (ref_code,))
+    affected = c.rowcount; conn.commit(); conn.close()
+    return affected > 0
+
 def db_find_agent(player_id):
     seen = set(); cur = player_id
     conn = get_db(); c = conn.cursor()
@@ -133,8 +201,7 @@ def db_find_agent(player_id):
         row = c.fetchone()
         if not row: conn.close(); return None
         cols = ["telegram_id","username","first_name","role","ref_code",
-                "promo_url","invited_by","invite_count","notify","created_at"]
-        u = dict(zip(cols, row))
+                "promo_url","invited_by","invite_count","notify","status","created_at"]
         if u["role"] == "agent": conn.close(); return u
         cur = u.get("invited_by")
     conn.close(); return None
@@ -206,10 +273,13 @@ def handle_start(msg):
         if u and u.get("role")=="agent":
             link = f"https://t.me/{BOT_USERNAME}?start={uid}"
             tgd = f"@{u.get('username')}" if u.get("username") else f"ID:{uid}"
+            status = u.get("status","active")
+            si = {"active":"✅ Active","pending":"⏳ Pending Review","banned":"🚫 Banned"}.get(status,"❓ Unknown")
             send(cid, f"<b>🤖 PH90 WFH Bonus Bot</b>\n\n👤 {fname}\n📱 Telegram: {tgd}\n"
                  f"🏷️ Ref: <code>{u.get('ref_code','Not set')}</code>\n"
                  f"🔗 Reg: {u.get('promo_url','Not set')}\n📢 Share:\n{link}\n"
-                 f"📊 Invites: {u.get('invite_count',0)}\n\n<b>Commands:</b> /my /players /share /daily /help")
+                 f"📊 Invites: {u.get('invite_count',0)}\n📌 Status: {si}\n"
+                 f"\n<b>Commands:</b> /my /players /share /daily /help")
         else:
             send(cid, f"<b>🤖 PH90 WFH Bonus Bot</b>\n\n👤 Hi {fname}!\n\n"
                  f"🎰 Get <b>{DEFAULT_REWARD}</b> through a referral link!\n\n"
@@ -221,6 +291,10 @@ def handle_deep_link(cid, uid, uname, fname, ref_id):
     if not inviter: return send(cid, "<b>⚠️ Invalid Link</b>\n\nInviter not found.")
     agent = db_find_agent(ref_id)
     if not agent: return send(cid, "<b>⚠️ Agent Not Found</b>\n\nInviter hasn't bound yet.")
+    if agent.get("status") == "pending":
+        return send(cid, "<b>⏳ Agent Not Yet Approved</b>\n\nYour inviter is pending admin review.\nPlease try again later.")
+    if agent.get("status") == "banned":
+        return send(cid, "<b>🚫 Link Disabled</b>\n\nThis referral link is no longer active.\nPlease contact admin for assistance.")
     ex = db_get_user(uid); is_new = not ex or not ex.get("invited_by")
     if is_new:
         db_upsert_user(uid, username=uname, first_name=fname, role="player",
@@ -253,13 +327,15 @@ def handle_bind(msg):
     if conflict: return send(cid, f"<b>⚠️ Ref Code Already Taken</b>\n\n"
                              f"<code>{rc}</code> already bound by {conflict[1]}.")
     db_upsert_user(uid, username=uname, first_name=fname, role="agent",
-                   ref_code=rc, promo_url=result)
+                   ref_code=rc, promo_url=result, status="pending")
     link = f"https://t.me/{BOT_USERNAME}?start={uid}"
     tgd = f"@{uname}" if uname else f"ID:{uid}"
-    send(cid, f"<b>✅ Bind Successful!</b>\n\n👤 {fname}\n📱 Telegram: {tgd}\n"
-         f"🏷️ Ref: <code>{rc}</code>\n🔗 Reg: {result}\n📢 Share:\n{link}\n\n"
-         f"<b>💡 Next:</b>\n• Copy Share Link → send to players\n"
-         f"• New players = instant notification 🔔\n• /share /players /daily")
+    send(cid, f"<b>✅ Bind Successful! — Awaiting Approval</b>\n\n👤 {fname}\n📱 Telegram: {tgd}\n"
+         f"🏷️ Ref: <code>{rc}</code>\n🔗 Reg: {result}\n\n"
+         f"<b>⏳ Status: Pending Review</b>\n"
+         f"Your account will be reviewed by admin.\n"
+         f"Once approved, your share link will become active.\n\n"
+         f"<b>Commands:</b> /my /share /help")
 
 def handle_my(msg):
     chat = msg.get("chat",{}); frm = msg.get("from",{})
@@ -269,10 +345,14 @@ def handle_my(msg):
     link = f"https://t.me/{BOT_USERNAME}?start={uid}"
     if u.get("role")=="agent":
         rc = u.get("ref_code","N/A"); total = len(db_players(rc)); today = db_today_count(rc)
+        week = db_week_count(rc); month = db_month_count(rc)
+        status = u.get("status","active")
+        status_icon = {"active":"✅","pending":"⏳","banned":"🚫"}.get(status,"❓")
         tga = f"@{u.get('username')}" if u.get("username") else f"ID:{uid}"
         send(cid, f"<b>📊 My Stats</b>\n\n👤 {u.get('first_name','N/A')}\n📱 Telegram: {tga}\n"
-             f"🏷️ Role: <b>Agent</b>\n🔖 Ref: <code>{rc}</code>\n🔗 Reg: {u.get('promo_url','N/A')}\n"
-             f"📢 Share:\n{link}\n━━━━━━━━━━━━━━━━━\n📊 Total: {total}\n🆕 Today: {today}\n"
+             f"🏷️ Role: <b>Agent</b> {status_icon}\n🔖 Ref: <code>{rc}</code>\n🔗 Reg: {u.get('promo_url','N/A')}\n"
+             f"📢 Share:\n{link}\n━━━━━━━━━━━━━━━━━\n🆕 Today: {today}\n📅 This Week: {week}\n"
+             f"📆 This Month: {month}\n📊 Total: {total}\n"
              f"━━━━━━━━━━━━━━━━━\n<b>More:</b> /players /share /daily")
     else:
         agent = db_find_agent(uid)
@@ -321,16 +401,121 @@ def handle_daily(msg):
     u = db_get_user(uid)
     if not u or u.get("role")!="agent": return send(cid, "Only agents. /bind first.")
     rc = u["ref_code"]; today = db_today_count(rc); total = len(db_players(rc))
+    week = db_week_count(rc); month = db_month_count(rc)
     link = f"https://t.me/{BOT_USERNAME}?start={uid}"
     mood = "🔥 Great momentum!" if today>0 else "💤 No new players yet. Share your link!"
-    send(cid, f"<b>📅 Today — {time.strftime('%Y-%m-%d')}</b>\n\n🏷️ Ref: <code>{rc}</code>\n"
-         f"━━━━━━━━━━━━━━━━━\n🆕 Today: <b>{today}</b>\n📊 Total: <b>{total}</b>\n"
+    send(cid, f"<b>📅 Daily Stats — {time.strftime('%Y-%m-%d')}</b>\n\n🏷️ Ref: <code>{rc}</code>\n"
+         f"━━━━━━━━━━━━━━━━━\n🆕 Today: <b>{today}</b>\n📅 This Week: <b>{week}</b>\n"
+         f"📆 This Month: <b>{month}</b>\n📊 Total: <b>{total}</b>\n"
          f"━━━━━━━━━━━━━━━━━\n{mood}\n\n📢 Share:\n{link}\n\n<b>Commands:</b> /players /share /my")
 
-def handle_help(cid):
-    send(cid, "<b>📋 Commands</b>\n\n<b>Agents:</b>\n/bind &lt;link&gt; — Bind promo link\n"
-         "/my — Stats\n/players — Player list\n/share — Promo text\n/daily — Today\n\n"
-         "<b>Players:</b>\n/start — Start\n/my — Stats\n/share — Share text\n/help — Help")
+def handle_help(msg):
+    chat = msg.get("chat",{}); cid = chat.get("id")
+    uid = msg.get("from",{}).get("id")
+    base = ("<b>📋 Commands</b>\n\n<b>Agents:</b>\n/bind &lt;link&gt; — Bind promo link\n"
+            "/my — Stats\n/players — Player list\n/share — Promo text\n/daily — Today\n\n"
+            "<b>Everyone:</b>\n/start — Start\n/top — Leaderboard\n/help — Help")
+    if is_admin(uid):
+        base += ("\n\n<b>🔧 Admin:</b>\n/admin — Dashboard\n/approve &lt;code&gt; — Approve agent\n"
+                 "/ban &lt;code&gt; — Ban agent\n/unban &lt;code&gt; — Unban agent\n"
+                 "/broadcast &lt;msg&gt; — Message all agents")
+    send(cid, base)
+
+# ── Admin Commands ──────────────────────────────────────────────
+
+def handle_admin(msg):
+    chat = msg.get("chat",{}); frm = msg.get("from",{})
+    cid = chat.get("id"); uid = frm.get("id")
+    if not is_admin(uid):
+        return send(cid, "⛔ Admin only.")
+    s = db_global_stats()
+    top_lines = []
+    for i, (rc, name, cnt) in enumerate(s["top"], 1):
+        top_lines.append(f"{i}. <code>{rc}</code> — {name} ({cnt} players)")
+    send(cid, f"<b>📊 Admin Dashboard</b>\n\n"
+         f"👥 Agents: {s['active_agents']} active / {s['pending_agents']} pending / {s['total_agents']} total\n"
+         f"👤 Players: {s['total_players']} total\n"
+         f"━━━━━━━━━━━━━━━━━\n"
+         f"🆕 Today: {s['today_players']}\n📅 This Week: {s['week_players']}\n"
+         f"📆 This Month: {s['month_players']}\n"
+         f"━━━━━━━━━━━━━━━━━\n"
+         f"<b>🏆 Top 10 Agents:</b>\n" + "\n".join(top_lines) + "\n"
+         f"━━━━━━━━━━━━━━━━━\n"
+         f"<b>Admin:</b> /approve /ban /unban /broadcast")
+
+def handle_broadcast(msg):
+    chat = msg.get("chat",{}); frm = msg.get("from",{})
+    cid = chat.get("id"); uid = frm.get("id")
+    if not is_admin(uid):
+        return send(cid, "⛔ Admin only.")
+    text = msg.get("text","").strip()
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        return send(cid, "<b>Usage:</b> /broadcast Your message here")
+    message = parts[1]
+    agent_ids = db_all_agent_ids()
+    success = 0; fail = 0
+    for aid in agent_ids:
+        r = send(aid, f"<b>📢 Admin Broadcast</b>\n\n{message}")
+        if r and r.get("ok"): success += 1
+        else: fail += 1
+        time.sleep(0.3)
+    send(cid, f"<b>📢 Broadcast Sent</b>\n\n✅ {success} delivered\n❌ {fail} failed\n📊 Total agents: {len(agent_ids)}")
+
+def handle_approve(msg):
+    chat = msg.get("chat",{}); frm = msg.get("from",{})
+    cid = chat.get("id"); uid = frm.get("id")
+    if not is_admin(uid):
+        return send(cid, "⛔ Admin only.")
+    text = msg.get("text","").strip()
+    parts = text.split()
+    if len(parts) < 2:
+        return send(cid, "<b>Usage:</b> /approve &lt;ref_code&gt;")
+    ref_code = parts[1]
+    if db_approve_agent(ref_code):
+        send(cid, f"✅ Agent <code>{ref_code}</code> approved! Share link is now active.")
+    else:
+        send(cid, f"❌ Agent <code>{ref_code}</code> not found or already approved.")
+
+def handle_ban(msg):
+    chat = msg.get("chat",{}); frm = msg.get("from",{})
+    cid = chat.get("id"); uid = frm.get("id")
+    if not is_admin(uid):
+        return send(cid, "⛔ Admin only.")
+    text = msg.get("text","").strip()
+    parts = text.split()
+    if len(parts) < 2:
+        return send(cid, "<b>Usage:</b> /ban &lt;ref_code&gt;")
+    ref_code = parts[1]
+    if db_ban_agent(ref_code):
+        send(cid, f"🚫 Agent <code>{ref_code}</code> banned.")
+    else:
+        send(cid, f"❌ Agent <code>{ref_code}</code> not found.")
+
+def handle_unban(msg):
+    chat = msg.get("chat",{}); frm = msg.get("from",{})
+    cid = chat.get("id"); uid = frm.get("id")
+    if not is_admin(uid):
+        return send(cid, "⛔ Admin only.")
+    text = msg.get("text","").strip()
+    parts = text.split()
+    if len(parts) < 2:
+        return send(cid, "<b>Usage:</b> /unban &lt;ref_code&gt;")
+    ref_code = parts[1]
+    if db_approve_agent(ref_code):
+        send(cid, f"✅ Agent <code>{ref_code}</code> unbanned / re-approved.")
+    else:
+        send(cid, f"❌ Agent <code>{ref_code}</code> not found.")
+
+def handle_top(msg):
+    chat = msg.get("chat",{}); frm = msg.get("from",{})
+    cid = chat.get("id")
+    s = db_global_stats()
+    lines = [f"<b>🏆 Agent Leaderboard</b>\n"]
+    for i, (rc, name, cnt) in enumerate(s["top"], 1):
+        medal = {1:"🥇",2:"🥈",3:"🥉"}.get(i, f"{i}.")
+        lines.append(f"{medal} <code>{rc}</code> — {name} ({cnt} players)")
+    send(cid, "\n".join(lines) + "\n\n<b>Commands:</b> /my /daily /help")
 
 # ── Update Processor ────────────────────────────────────────────
 
@@ -350,7 +535,13 @@ def process_update(update):
         elif text.startswith("/share"): handle_share(msg)
         elif text.startswith("/daily"): handle_daily(msg)
         elif text.startswith("/my"): handle_my(msg)
-        elif text.startswith("/help"): handle_help(msg.get("chat",{}).get("id"))
+        elif text.startswith("/help"): handle_help(msg)
+        elif text.startswith("/admin"): handle_admin(msg)
+        elif text.startswith("/broadcast"): handle_broadcast(msg)
+        elif text.startswith("/approve"): handle_approve(msg)
+        elif text.startswith("/ban"): handle_ban(msg)
+        elif text.startswith("/unban"): handle_unban(msg)
+        elif text.startswith("/top"): handle_top(msg)
     elif "callback_query" in update:
         cb = update["callback_query"]; data = cb.get("data",""); cbid = cb.get("id")
         cbmsg = cb.get("message",{}); cbfrm = cb.get("from",{})

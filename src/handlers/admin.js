@@ -68,15 +68,26 @@ async function handleAddAgent(ctx) {
   const token = await createInviteToken('agent_bind', agentCode, ctx.from.id);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
 
+  // 自动生成 Agent Affiliate Link
+  const domain = (process.env.ALLOWED_DOMAINS || '90jilia2.com').split(',')[0].trim();
+  const agentPromo = `http://${domain}/?r=${agentCode}`;
+  await db.query(`UPDATE agents SET promo_url = $1 WHERE agent_code = $2`, [agentPromo, agentCode]);
+
   await audit.log(ctx.from.id, 'admin', 'create_agent', 'agent', agentCode, { name, token });
 
   return ctx.reply(
-    `✅ <b>Agent 创建成功</b>\n\n` +
-    `🏷️ Code：<code>${agentCode}</code>\n` +
-    `👤 Name：${name}\n\n` +
-    `<b>🔗 绑定链接（发给 Agent）：</b>\n` +
-    `<code>${link}</code>\n\n` +
-    `⚠️ 此链接只能使用一次，有效期48小时。`,
+    `👥 <b>Admin Create Agent</b>\n\n` +
+    `<code>/add_agent ${agentCode} ${name}</code>\n\n` +
+    `✅ Agent Created Successfully\n` +
+    `Agent Code：<code>${agentCode}</code>\n` +
+    `Name：${name}\n\n` +
+    `Agent Affiliate Link：\n` +
+    `${agentPromo}\n` +
+    `━━━━━━━━━━━━━━━\n\n` +
+    `📋 Agent Bot Link：\n` +
+    `${link}\n` +
+    `━━━━━━━━━━━━━━━\n\n` +
+    `⚠️ One-time use only, valid for 48 hours`,
     { parse_mode: 'HTML' }
   );
 }
@@ -254,12 +265,12 @@ async function handleListPending(ctx) {
      WHERE p.game_id IS NOT NULL AND p.game_id_status = 'pending'
      ORDER BY p.created_at DESC LIMIT 30`
   );
-  if (res.rows.length === 0) return ctx.reply('✅ 暂无待审核的 Game ID。');
-  const lines = ['<b>⏳ 待审核 Game ID</b>\n'];
+  if (res.rows.length === 0) return ctx.reply('✅ No pending Game IDs.');
+  const lines = ['<b>⏳ Pending Review：</b>\n'];
   for (const r of res.rows) {
-    lines.push(`TG: <code>${r.telegram_id}</code> | GameID: <code>${r.game_id}</code> | PM: ${r.promoter_code || '-'} | Agent: ${r.agent_code || '-'}`);
+    lines.push(`Telegram：@${r.username || '-'}\nTelegram ID：<code>${r.telegram_id}</code>\nGame ID：<code>${r.game_id}</code>\n`);
   }
-  lines.push(`\n<b>审批：</b> <code>/approve_game TGID</code> | <code>/reject_game TGID</code>`);
+  lines.push(`<code>/approve_game TGID</code>\n✅ Review Approved\n\n<code>/reject_game TGID</code>\n❌ Rejected`);
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
@@ -275,7 +286,7 @@ async function handleApproveGame(ctx) {
   );
   if (res.rowCount === 0) return ctx.reply(`未找到玩家 <code>${tgId}</code> 或未提交 Game ID。`, { parse_mode: 'HTML' });
   await audit.log(ctx.from.id, 'admin', 'approve_game', 'player', String(tgId));
-  return ctx.reply(`✅ 玩家 <code>${tgId}</code> Game ID 已通过审核。`, { parse_mode: 'HTML' });
+  return ctx.reply(`✅ Review Approved`, { parse_mode: 'HTML' });
 }
 
 // /reject_game 1259096820
@@ -290,7 +301,7 @@ async function handleRejectGame(ctx) {
   );
   if (res.rowCount === 0) return ctx.reply(`未找到玩家 <code>${tgId}</code> 或未提交 Game ID。`, { parse_mode: 'HTML' });
   await audit.log(ctx.from.id, 'admin', 'reject_game', 'player', String(tgId));
-  return ctx.reply(`❌ 玩家 <code>${tgId}</code> Game ID 已拒绝。`, { parse_mode: 'HTML' });
+  return ctx.reply(`❌ Rejected`, { parse_mode: 'HTML' });
 }
 
 module.exports = {

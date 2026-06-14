@@ -60,14 +60,10 @@ async function handleBindToken(ctx, payload, uid) {
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
 
       return ctx.reply(
-        `🎉 <b>Agent 绑定成功！</b>\n\n` +
-        `🏷️ 你的 Agent Code：<code>${code}</code>\n` +
-        `📱 Telegram ID：<code>${uid}</code>\n\n` +
-        `<b>可用命令：</b>\n` +
-        `/agent — Agent 菜单\n` +
-        `/add_promoter — 创建 Promoter\n` +
-        `/list_my_promoters — 查看下级 Promoter\n` +
-        `/list_my_players — 查看线下玩家`,
+        `👥 <b>Agent Clicks Binding Link</b>\n\n` +
+        `🎉 Agent Bound Successfully!\n` +
+        `Agent Code：<code>${code}</code>\n\n` +
+        `Available Commands：/agent | /add_promoter | /list_my_promoters | /list_my_players`,
         { parse_mode: 'HTML' }
       );
     }
@@ -97,15 +93,11 @@ async function handleBindToken(ctx, payload, uid) {
       const p = pm.rows[0];
 
       return ctx.reply(
-        `🎉 <b>Promoter 绑定成功！</b>\n\n` +
-        `🏷️ 你的 Promoter Code：<code>${code}</code>\n` +
-        `📱 Telegram ID：<code>${uid}</code>\n` +
-        `👤 所属 Agent：${p.agent_name} (${p.agent_code})\n\n` +
-        `<b>可用命令：</b>\n` +
-        `/promoter — Promoter 菜单\n` +
-        `/my_link — 获取推广链接\n` +
-        `/my_players — 查看我的玩家\n` +
-        `/my_today — 今日数据`,
+        `📢 <b>Promoter Clicks Binding Link</b>\n\n` +
+        `🎉 Promoter Bound Successfully!\n` +
+        `Promoter Code：<code>${code}</code>\n` +
+        `Assigned Agent：${p.agent_code}\n\n` +
+        `Available Commands：/promoter | /set_promo | /my_link | /my_players | /share`,
         { parse_mode: 'HTML' }
       );
     }
@@ -182,12 +174,9 @@ async function handlePlayerEntry(ctx, payload, uid) {
   });
 
   return ctx.reply(
-    `🎰 <b>欢迎！</b>\n\n` +
-    `🏷️ 你的推广来源：<code>${promoterCode}</code>\n` +
-    `👤 Agent：${promoter.agent_name}\n\n` +
-    `<b>可用命令：</b>\n` +
-    `/submit PH90xxxx — 提交游戏ID\n` +
-    `/my — 查看我的资料`,
+    `🎰 <b>Welcome！</b>\n` +
+    `Referral Source：<code>${promoterCode}</code>\n\n` +
+    `Available Commands：/submit PH90xxxx | /my`,
     { parse_mode: 'HTML' }
   );
 }

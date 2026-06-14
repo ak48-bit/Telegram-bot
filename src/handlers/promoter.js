@@ -22,18 +22,18 @@ async function handlePromoter(ctx) {
   );
   const s = stats.rows[0];
   const promoLine = p.promo_url
-    ? `Promoter Link：\n${p.promo_url}`
-    : 'Promoter Link：';
+    ? `Promoter Affiliate Link：\n${p.promo_url}`
+    : 'Promoter Affiliate Link：';
 
   return ctx.reply(
-    `📢 <b>Promoter 面板</b>\n\n` +
+    `📢 <b>Promoter</b>\n\n` +
     `Upline Agent：<code>${p.agent_code}</code>\n\n` +
     `Promoter Code：<code>${p.promoter_code}</code>\n` +
     `Name：${p.name}\n` +
     `Telegram：@${ctx.from.username || '-'}\n` +
     `Telegram ID：<code>${uid}</code>\n` +
     `${promoLine}\n` +
-    `Status：${p.promo_url ? '✅ Active' : '未提交 — /set_promo'}\n\n` +
+    `Status：${p.promo_url ? '✅ Active' : 'Not Submitted — /set_promo'}\n\n` +
     `Players：${s.total} total | 🆕 Today: ${s.today}\n\n` +
     `/set_promo | /my_link | /my_players | /my_today | /share`,
     { parse_mode: 'HTML' }
@@ -139,7 +139,10 @@ async function handleSetPromo(ctx) {
     [url, uid]
   );
   return ctx.reply(
-    `✅ Promoter Affiliate Link set!\n\n${url}\n\nPlayers clicking your Bot link will see this affiliate link.`,
+    `📢 <b>Promoter Sets Up Promotion Link</b>\n\n` +
+    `<code>/set_promo ${url}</code>\n\n` +
+    `✅ Promoter Affiliate Link set!\n\n` +
+    `${url}`,
     { parse_mode: 'HTML' }
   );
 }

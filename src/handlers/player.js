@@ -26,9 +26,11 @@ async function handleSubmit(ctx) {
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId });
 
   return ctx.reply(
-    `✅ <b>提交成功</b>\n\n` +
-    `你的游戏 ID：<code>${gameId}</code>\n` +
-    `状态：<b>等待审核</b>`,
+    `🎮 <b>Submit Game ID</b>\n\n` +
+    `<code>/submit ${gameId}</code>\n\n` +
+    `✅ Submitted Successfully\n` +
+    `Game ID：<code>${gameId}</code>\n` +
+    `Status：Pending Review`,
     { parse_mode: 'HTML' }
   );
 }
@@ -53,7 +55,7 @@ async function handlePlayerMy(ctx) {
   const statusText = { pending: 'Pending Review...⏳', approved: 'Approved ✅', rejected: 'Rejected ❌' };
 
   return ctx.reply(
-    `🎮 <b>Player 面板</b>\n\n` +
+    `🎮\n\n` +
     `Telegram：@${ctx.from.username || '-'}\n` +
     `Telegram ID：<code>${uid}</code>\n` +
     `Game ID：<code>${p.game_id || '未提交'}</code>\n` +

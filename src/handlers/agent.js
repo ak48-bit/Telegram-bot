@@ -98,16 +98,24 @@ async function handleAddPromoter(ctx) {
   const token = await createInviteToken('promoter_bind', promoterCode, uid);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
 
+  // 自动生成 Promoter Affiliate Link
+  const domain = (process.env.ALLOWED_DOMAINS || '90jilia2.com').split(',')[0].trim();
+  const promoUrl = `http://${domain}/?r=${promoterCode}`;
+  await db.query(`UPDATE promoters SET promo_url = $1 WHERE promoter_code = $2`, [promoUrl, promoterCode]);
+
   await audit.log(uid, 'agent', 'create_promoter', 'promoter', promoterCode, { name, token });
 
   return ctx.reply(
-    `✅ <b>Promoter 创建成功</b>\n\n` +
-    `🏷️ Code：<code>${promoterCode}</code>\n` +
-    `👤 Name：${name}\n` +
-    `🏢 Agent：${agent.agent_code}\n\n` +
-    `<b>🔗 绑定链接（发给 Promoter）：</b>\n` +
-    `<code>${link}</code>\n\n` +
-    `⚠️ 此链接只能使用一次，有效期48小时。`,
+    `👥 <b>Agent Creates a Promoter</b>\n\n` +
+    `<code>/add_promoter ${promoterCode} ${name}</code>\n\n` +
+    `✅ Promoter Created Successfully\n` +
+    `Promoter Code：<code>${promoterCode}</code>\n` +
+    `Name：${name}\n\n` +
+    `Promoter Affiliate Link：\n` +
+    `${promoUrl}\n\n` +
+    `Promoter Bot Link：\n` +
+    `${link}\n\n` +
+    `⚠️ One-time use only, valid for 48 hours`,
     { parse_mode: 'HTML' }
   );
 }

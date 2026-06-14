@@ -15,7 +15,8 @@ async function handlePromoter(ctx) {
   const p = pm.rows[0];
   const stats = await db.query(
     `SELECT COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today
+            COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today,
+            COUNT(*) FILTER (WHERE game_id_status = 'approved') AS approved
      FROM players WHERE promoter_id = $1`,
     [p.id]
   );
@@ -25,8 +26,10 @@ async function handlePromoter(ctx) {
     `📢 <b>Promoter Menu</b>\n\n` +
     `🏷️ Code：<code>${p.promoter_code}</code>\n` +
     `👤 Name：${p.name}\n` +
-    `🏢 Agent：${p.agent_code} (${p.agent_name})\n\n` +
-    `🎮 My Players: ${s.total} total | 🆕 Today: ${s.today}\n\n` +
+    `📱 TG ID：<code>${uid}</code>\n` +
+    `🏢 绑定 Agent：${p.agent_code} (${p.agent_name})\n\n` +
+    `🎮 My Players: ${s.total} total | 🆕 Today: ${s.today}\n` +
+    `✅ Approved: ${s.approved || 0}\n\n` +
     `<b>Commands:</b>\n` +
     `/my_link — 获取推广链接\n` +
     `/my_players — 查看我的玩家\n` +

@@ -12,7 +12,7 @@ const {
 } = require('./handlers/admin');
 const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
-  handleListMyPlayers, handleExportMyPlayers,
+  handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
 } = require('./handlers/agent');
 const {
   handlePromoter, handleMyLink, handleMyPlayers, handleMyToday,
@@ -50,6 +50,7 @@ bot.command('add_promoter', requireRole('agent'), handleAddPromoter);
 bot.command('list_my_promoters', requireRole('agent'), handleListMyPromoters);
 bot.command('list_my_players', requireRole('agent'), handleListMyPlayers);
 bot.command('export_my_players', requireRole('agent'), handleExportMyPlayers);
+bot.command('relink_pm', requireRole('agent'), handleRelinkPromoter);
 
 // ── Promoter 命令 ────────────────────────────────────────────────
 bot.command('promoter', requireRole('promoter'), handlePromoter);

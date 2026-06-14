@@ -24,15 +24,37 @@ async function handleAgent(ctx) {
   );
   const s = stats.rows[0];
 
+  // 获取名下 Promoter 列表（含 Telegram 信息）
+  const pms = await db.query(
+    `SELECT pm.promoter_code, pm.name, pm.status, pm.telegram_id,
+            u.username, u.first_name
+     FROM promoters pm
+     LEFT JOIN users u ON pm.telegram_id = u.telegram_id
+     WHERE pm.agent_id = $1
+     ORDER BY pm.created_at DESC`,
+    [a.id]
+  );
+
+  let pmList = '';
+  for (const pm of pms.rows) {
+    const status = { active: '✅', blocked: '🚫', pending: '⏳' }[pm.status] || '❓';
+    const tgDisplay = pm.telegram_id
+      ? `@${pm.username || '-'} | <code>${pm.telegram_id}</code>`
+      : '未绑定 — <code>/relink_pm ' + pm.promoter_code + '</code>';
+    pmList += `${status} <code>${pm.promoter_code}</code> ${pm.name} | ${tgDisplay}\n`;
+  }
+
   return ctx.reply(
     `🏢 <b>Agent Menu</b>\n\n` +
     `🏷️ Code：<code>${a.agent_code}</code>\n` +
     `👤 Name：${a.name}\n\n` +
     `📊 Promoters: ${s.active_promoters} active / ${s.promoters} total\n` +
     `🎮 Players: ${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
+    `<b>📋 Promoter 列表：</b>\n` + (pmList || '暂无 Promoter\n') + '\n' +
     `<b>Commands:</b>\n` +
     `/add_promoter B001 Name — 创建 Promoter\n` +
     `/list_my_promoters — 查看下级 Promoter\n` +
+    `/relink_pm B001 — 重新生成 Promoter 绑定链接\n` +
     `/list_my_players — 查看线下玩家\n` +
     `/export_my_players — 导出玩家`,
     { parse_mode: 'HTML' }
@@ -163,7 +185,47 @@ async function handleExportMyPlayers(ctx) {
   }
 }
 
+// /relink_pm B001 — 重新生成 Promoter 绑定链接
+async function handleRelinkPromoter(ctx) {
+  const uid = ctx.from.id;
+  const ag = await db.query('SELECT * FROM agents WHERE telegram_id = $1', [uid]);
+  if (ag.rows.length === 0) return ctx.reply('未绑定 Agent。');
+
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('格式：<code>/relink_pm B001</code>', { parse_mode: 'HTML' });
+  const code = parts[1];
+
+  // 检查 Promoter 是否属于该 Agent
+  const pm = await db.query(
+    `SELECT * FROM promoters WHERE promoter_code = $1 AND agent_id = $2`,
+    [code, ag.rows[0].id]
+  );
+  if (pm.rows.length === 0) return ctx.reply(`❌ Promoter <code>${code}</code> 未找到或不属于你。`, { parse_mode: 'HTML' });
+
+  // 禁用旧的未使用 token
+  await db.query(
+    `UPDATE invite_tokens SET is_used = TRUE WHERE code = $1 AND type = 'promoter_bind' AND is_used = FALSE`,
+    [code]
+  );
+
+  // 生成新 token
+  const token = await createInviteToken('promoter_bind', code, uid);
+  const link = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
+
+  await audit.log(uid, 'agent', 'relink_promoter', 'promoter', code);
+
+  return ctx.reply(
+    `🔗 <b>Promoter 绑定链接（新）</b>\n\n` +
+    `🏷️ Code：<code>${code}</code>\n` +
+    `👤 Name：${pm.rows[0].name}\n\n` +
+    `<code>${link}</code>\n\n` +
+    `⚠️ 旧链接已失效，此链接只能使用一次，有效期48小时。`,
+    { parse_mode: 'HTML' }
+  );
+}
+
 module.exports = {
   handleAgent, handleAddPromoter, handleListMyPromoters,
   handleListMyPlayers, handleExportMyPlayers,
+  handleRelinkPromoter,
 };

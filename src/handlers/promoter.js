@@ -27,11 +27,13 @@ async function handlePromoter(ctx) {
     `🏷️ Code：<code>${p.promoter_code}</code>\n` +
     `👤 Name：${p.name}\n` +
     `📱 TG ID：<code>${uid}</code>\n` +
-    `🏢 绑定 Agent：${p.agent_code} (${p.agent_name})\n\n` +
+    `🏢 绑定 Agent：${p.agent_code} (${p.agent_name})\n` +
+    `🔗 推广链接：${p.promo_url ? '<code>' + p.promo_url + '</code>' : '未设置 — /set_promo'}\n\n` +
     `🎮 My Players: ${s.total} total | 🆕 Today: ${s.today}\n` +
     `✅ Approved: ${s.approved || 0}\n\n` +
     `<b>Commands:</b>\n` +
-    `/my_link — 获取推广链接\n` +
+    `/set_promo http://域名.com/?r=你的码 — 设置推广链接\n` +
+    `/my_link — 获取玩家推广链接\n` +
     `/my_players — 查看我的玩家\n` +
     `/my_today — 今日数据`,
     { parse_mode: 'HTML' }
@@ -46,15 +48,22 @@ async function handleMyLink(ctx) {
   );
   if (pm.rows.length === 0) return ctx.reply('你还没有绑定 Promoter 身份。');
 
-  const link = `https://t.me/${BOT_USERNAME}?start=p_${pm.rows[0].promoter_code}`;
+  const p = pm.rows[0];
+  const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
 
-  return ctx.reply(
-    `📢 <b>你的推广链接</b>\n\n` +
+  let msg = `📢 <b>你的推广链接</b>\n\n` +
+    `🏷️ Code：<code>${p.promoter_code}</code>\n`;
+  if (p.promo_url) {
+    msg += `🔗 推广域名：<code>${p.promo_url}</code>\n`;
+  } else {
+    msg += `🔗 推广域名：<i>未设置 — /set_promo</i>\n`;
+  }
+  msg += `\n📋 <b>Telegram 链接：</b>\n` +
     `<code>${link}</code>\n\n` +
-    `点击上方链接复制，发送给玩家即可。\n` +
-    `玩家通过此链接进入 Bot，自动归到你名下。`,
-    { parse_mode: 'HTML' }
-  );
+    `复制发给玩家 → 玩家点进来 → 自动归到你名下 → 跳转到你的推广域名。\n\n` +
+    `设置推广域名：<code>/set_promo http://域名/?r=你的码</code>`;
+
+  return ctx.reply(msg, { parse_mode: 'HTML' });
 }
 
 // /my_players [page]
@@ -117,4 +126,23 @@ async function handleMyToday(ctx) {
   );
 }
 
-module.exports = { handlePromoter, handleMyLink, handleMyPlayers, handleMyToday };
+// /set_promo http://90jilia2.com/?r=ph90hk433
+async function handleSetPromo(ctx) {
+  const uid = ctx.from.id;
+  const text = ctx.message.text.trim();
+  const parts = text.split(/\s+/);
+  if (parts.length < 2) return ctx.reply('格式：<code>/set_promo http://你的域名.com/?r=你的码</code>', { parse_mode: 'HTML' });
+  const url = parts[1];
+  if (!url.startsWith('http')) return ctx.reply('❌ 链接必须以 http:// 或 https:// 开头。');
+
+  await db.query(
+    `UPDATE promoters SET promo_url = $1, updated_at = NOW() WHERE telegram_id = $2`,
+    [url, uid]
+  );
+  return ctx.reply(
+    `✅ 推广链接已设置！\n\n🔗 <code>${url}</code>\n\n玩家通过你的 p_ 链接进入 Bot 后，将跳转到此链接。`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+module.exports = { handlePromoter, handleMyLink, handleMyPlayers, handleMyToday, handleSetPromo };

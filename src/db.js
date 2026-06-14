@@ -67,6 +67,7 @@ async function initDB() {
       telegram_id BIGINT UNIQUE REFERENCES users(telegram_id),
       agent_id INTEGER REFERENCES agents(id),
       name TEXT NOT NULL,
+      promo_url TEXT,
       status TEXT DEFAULT 'active' CHECK (status IN ('active','blocked','pending')),
       created_by_agent_id BIGINT REFERENCES users(telegram_id),
       created_at TIMESTAMP DEFAULT NOW(),
@@ -135,6 +136,8 @@ async function initDB() {
     `).join('')}
   `;
   await query(sql);
+  // 兼容旧表：添加 promo_url 列
+  await query('ALTER TABLE promoters ADD COLUMN IF NOT EXISTS promo_url TEXT').catch(() => {});
   console.log('[DB] All tables initialized. Admins:', config.ADMIN_IDS);
 }
 

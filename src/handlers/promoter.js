@@ -35,7 +35,8 @@ async function handlePromoter(ctx) {
     `/set_promo http://域名.com/?r=你的码 — 设置推广链接\n` +
     `/my_link — 获取玩家推广链接\n` +
     `/my_players — 查看我的玩家\n` +
-    `/my_today — 今日数据`,
+    `/my_today — 今日数据\n` +
+    `/share — 生成分享文案`,
     { parse_mode: 'HTML' }
   );
 }
@@ -51,17 +52,17 @@ async function handleMyLink(ctx) {
   const p = pm.rows[0];
   const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
 
-  let msg = `📢 <b>你的推广链接</b>\n\n` +
-    `🏷️ Code：<code>${p.promoter_code}</code>\n`;
+  let msg = `📢 <b>开发员推广链接</b>\n\n` +
+    `🏷️ 线上开发员 Code：<code>${p.promoter_code}</code>\n`;
   if (p.promo_url) {
-    msg += `🔗 推广域名：<code>${p.promo_url}</code>\n`;
+    msg += `🔗 开发员推广链接：<code>${p.promo_url}</code>\n`;
   } else {
-    msg += `🔗 推广域名：<i>未设置 — /set_promo</i>\n`;
+    msg += `🔗 开发员推广链接：<i>未提交 — /set_promo</i>\n`;
   }
-  msg += `\n📋 <b>Telegram 链接：</b>\n` +
+  msg += `\n📋 <b>玩家推广链接（机器人链接）：</b>\n` +
     `<code>${link}</code>\n\n` +
-    `复制发给玩家 → 玩家点进来 → 自动归到你名下 → 跳转到你的推广域名。\n\n` +
-    `设置推广域名：<code>/set_promo http://域名/?r=你的码</code>`;
+    `1️⃣ 先提交开发员推广链接 → 2️⃣ 复制机器人链接发给玩家。\n\n` +
+    `提交推广链接：<code>/set_promo http://域名/?r=你的码</code>`;
 
   return ctx.reply(msg, { parse_mode: 'HTML' });
 }
@@ -145,4 +146,33 @@ async function handleSetPromo(ctx) {
   );
 }
 
-module.exports = { handlePromoter, handleMyLink, handleMyPlayers, handleMyToday, handleSetPromo };
+// /share — 生成分享文案
+async function handleShare(ctx) {
+  const uid = ctx.from.id;
+  const pm = await db.query(
+    `SELECT * FROM promoters WHERE telegram_id = $1 AND status = 'active'`, [uid]
+  );
+  if (pm.rows.length === 0) return ctx.reply('未绑定 Promoter。');
+  const p = pm.rows[0];
+  const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
+
+  let msg = `📋 <b>开发员分享文案</b>\n\n`;
+  msg += `<b>复制以下文案发送给玩家：</b>\n\n`;
+  msg += `🎰 Free Spins + Signup Bonus\n`;
+  msg += `━━━━━━━━━━━━━━━\n`;
+
+  if (p.promo_url) {
+    msg += `🔗 开发员推广链接：\n<code>${p.promo_url}</code>\n\n`;
+  }
+
+  msg += `📋 玩家推广链接（机器人链接）：\n` +
+    `<code>${link}</code>\n` +
+    `━━━━━━━━━━━━━━━\n` +
+    `💰 注册即送 | 免费旋转\n` +
+    `📢 转发给好友一起领\n\n` +
+    `⚠️ 先设置开发员推广链接：<code>/set_promo http://域名/?r=你的码</code>`;
+
+  return ctx.reply(msg, { parse_mode: 'HTML' });
+}
+
+module.exports = { handlePromoter, handleMyLink, handleMyPlayers, handleMyToday, handleSetPromo, handleShare };

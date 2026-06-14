@@ -15,7 +15,7 @@ const {
   handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
 } = require('./handlers/agent');
 const {
-  handlePromoter, handleMyLink, handleMyPlayers, handleMyToday, handleSetPromo,
+  handlePromoter, handleMyLink, handleMyPlayers, handleMyToday, handleSetPromo, handleShare,
 } = require('./handlers/promoter');
 const { handleSubmit, handlePlayerMy } = require('./handlers/player');
 
@@ -58,6 +58,7 @@ bot.command('my_link', requireRole('promoter'), handleMyLink);
 bot.command('my_players', requireRole('promoter'), handleMyPlayers);
 bot.command('my_today', requireRole('promoter'), handleMyToday);
 bot.command('set_promo', requireRole('promoter'), handleSetPromo);
+bot.command('share', requireRole('promoter'), handleShare);
 
 // ── Player 命令 ──────────────────────────────────────────────────
 bot.command('submit', requireRole('player', 'admin', 'agent', 'promoter'), handleSubmit);

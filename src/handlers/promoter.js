@@ -22,7 +22,7 @@ async function handlePromoter(ctx) {
   );
   const s = stats.rows[0];
   const promoLine = p.promo_url
-    ? `Promoter Link：<code>${p.promo_url}</code>`
+    ? `Promoter Link：\n${p.promo_url}`
     : 'Promoter Link：';
 
   return ctx.reply(
@@ -54,14 +54,13 @@ async function handleMyLink(ctx) {
   let msg = `📢 <b>Promoter Affiliate Link</b>\n\n` +
     `Promoter Code：<code>${p.promoter_code}</code>\n`;
   if (p.promo_url) {
-    msg += `Promoter Affiliate Link：<code>${p.promo_url}</code>\n`;
+    msg += `Promoter Affiliate Link：\n${p.promo_url}\n`;
   } else {
     msg += `Promoter Affiliate Link：<i>未提交 — /set_promo</i>\n`;
   }
   msg += `\n<b>Players Bot Share Link：</b>\n` +
-    `<code>${link}</code>\n\n` +
-    `1️⃣ Submit the Affiliate link first → 2️⃣ Copy the bot link and send it to players\n\n` +
-    `Submit：<code>/set_promo http://域名/?r=你的码</code>`;
+    `${link}\n\n` +
+    `1️⃣ Submit the Affiliate link first → 2️⃣ Copy the bot link and send it to players`;
 
   return ctx.reply(msg, { parse_mode: 'HTML' });
 }
@@ -140,7 +139,7 @@ async function handleSetPromo(ctx) {
     [url, uid]
   );
   return ctx.reply(
-    `✅ 推广链接已设置！\n\n🔗 <code>${url}</code>\n\n玩家通过你的 p_ 链接进入 Bot 后，将跳转到此链接。`,
+    `✅ Promoter Affiliate Link set!\n\n${url}\n\nPlayers clicking your Bot link will see this affiliate link.`,
     { parse_mode: 'HTML' }
   );
 }
@@ -155,21 +154,18 @@ async function handleShare(ctx) {
   const p = pm.rows[0];
   const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
 
-  let msg = `📋 <b>开发员分享文案</b>\n\n`;
-  msg += `<b>复制以下文案发送给玩家：</b>\n\n`;
-  msg += `🎰 Free Spins + Signup Bonus\n`;
-  msg += `━━━━━━━━━━━━━━━\n`;
-
+  let msg = `📋 <b>Promoter Sharing Message</b>\n\n`;
+  msg += `  Copy the following message and send it to players：\n\n`;
+  msg += `  🎰 Share + Signup Reward\n`;
+  msg += `  ━━━━━━━━━━━━━━━\n`;
   if (p.promo_url) {
-    msg += `🔗 开发员推广链接：\n<code>${p.promo_url}</code>\n\n`;
+    msg += `  Promoter Affiliate Link：\n  ${p.promo_url}\n\n`;
   }
-
-  msg += `📋 玩家推广链接（机器人链接）：\n` +
-    `<code>${link}</code>\n` +
-    `━━━━━━━━━━━━━━━\n` +
-    `💰 注册即送 | 免费旋转\n` +
-    `📢 转发给好友一起领\n\n` +
-    `⚠️ 先设置开发员推广链接：<code>/set_promo http://域名/?r=你的码</code>`;
+  msg += `  📋 Promoter Bot Link：\n` +
+    `  ${link}\n` +
+    `  ━━━━━━━━━━━━━━━\n` +
+    `  💰 Register and Get a Bonus | Share and Get Extra Rewards\n` +
+    `  📢 Forward to your friends and claim together`;
 
   return ctx.reply(msg, { parse_mode: 'HTML' });
 }

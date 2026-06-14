@@ -51,17 +51,17 @@ async function handleMyLink(ctx) {
   const p = pm.rows[0];
   const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
 
-  let msg = `📢 <b>开发员推广链接</b>\n\n` +
-    `🏷️ 线上开发员 Code：<code>${p.promoter_code}</code>\n`;
+  let msg = `📢 <b>Promoter Affiliate Link</b>\n\n` +
+    `Promoter Code：<code>${p.promoter_code}</code>\n`;
   if (p.promo_url) {
-    msg += `🔗 开发员推广链接：<code>${p.promo_url}</code>\n`;
+    msg += `Promoter Affiliate Link：<code>${p.promo_url}</code>\n`;
   } else {
-    msg += `🔗 开发员推广链接：<i>未提交 — /set_promo</i>\n`;
+    msg += `Promoter Affiliate Link：<i>未提交 — /set_promo</i>\n`;
   }
-  msg += `\n📋 <b>玩家推广链接（机器人链接）：</b>\n` +
+  msg += `\n<b>Players Bot Share Link：</b>\n` +
     `<code>${link}</code>\n\n` +
-    `1️⃣ 先提交开发员推广链接 → 2️⃣ 复制机器人链接发给玩家。\n\n` +
-    `提交推广链接：<code>/set_promo http://域名/?r=你的码</code>`;
+    `1️⃣ Submit the Affiliate link first → 2️⃣ Copy the bot link and send it to players\n\n` +
+    `Submit：<code>/set_promo http://域名/?r=你的码</code>`;
 
   return ctx.reply(msg, { parse_mode: 'HTML' });
 }

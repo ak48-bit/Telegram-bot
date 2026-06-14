@@ -17,9 +17,22 @@ async function handleSubmit(ctx) {
     return ctx.reply('请先通过推广链接进入 Bot。');
   }
 
-  // 更新 game_id
+  // 自动去重：检查 game_id 是否已被提交
+  const dup = await db.query(
+    `SELECT telegram_id FROM players WHERE game_id = $1 AND telegram_id != $2`, [gameId, uid]
+  );
+  if (dup.rows.length > 0) {
+    return ctx.reply(
+      `⚠️ <b>Duplicate Game ID</b>\n\n` +
+      `Game ID：<code>${gameId}</code>\n` +
+      `This Game ID has already been submitted by another player.`,
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  // 自动通过
   await db.query(
-    `UPDATE players SET game_id = $1, game_id_status = 'pending', updated_at = NOW() WHERE telegram_id = $2`,
+    `UPDATE players SET game_id = $1, game_id_status = 'approved', updated_at = NOW() WHERE telegram_id = $2`,
     [gameId, uid]
   );
 
@@ -30,7 +43,7 @@ async function handleSubmit(ctx) {
     `<code>/submit ${gameId}</code>\n\n` +
     `✅ Submitted Successfully\n` +
     `Game ID：<code>${gameId}</code>\n` +
-    `Status：Pending Review`,
+    `Status：Approved ✅`,
     { parse_mode: 'HTML' }
   );
 }
@@ -53,13 +66,14 @@ async function handlePlayerMy(ctx) {
 
   const p = player.rows[0];
   const statusText = { pending: 'Pending Review...⏳', approved: 'Approved ✅', rejected: 'Rejected ❌' };
+  const st = statusText[p.game_id_status] || 'Not submitted';
 
   return ctx.reply(
     `🎮\n\n` +
     `Telegram：@${ctx.from.username || '-'}\n` +
     `Telegram ID：<code>${uid}</code>\n` +
     `Game ID：<code>${p.game_id || '未提交'}</code>\n` +
-    `Status：${statusText[p.game_id_status] || 'Not submitted'}\n\n` +
+    `Status：${st}\n\n` +
     `👤 Promoter：${p.promoter_name || '-'} (${p.promoter_code || '-'})`,
     { parse_mode: 'HTML' }
   );

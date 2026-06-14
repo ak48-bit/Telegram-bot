@@ -50,16 +50,15 @@ async function handlePlayerMy(ctx) {
   }
 
   const p = player.rows[0];
-  const statusText = { pending: '⏳ 等待审核', approved: '✅ 已通过', rejected: '❌ 未通过' };
+  const statusText = { pending: 'Pending Review...⏳', approved: 'Approved ✅', rejected: 'Rejected ❌' };
 
   return ctx.reply(
-    `🎮 <b>我的资料</b>\n\n` +
-    `📱 Telegram ID：<code>${uid}</code>\n` +
-    `🎯 Game ID：<code>${p.game_id || '未提交'}</code>\n` +
-    `📌 状态：${statusText[p.game_id_status] || '未提交'}\n\n` +
-    `👤 Promoter：${p.promoter_name || '-'} (<code>${p.promoter_code || '-'}</code>)\n` +
-    `🏢 Agent：${p.agent_name || '-'} (<code>${p.agent_code || '-'}</code>)\n\n` +
-    `提交 Game ID：<code>/submit PH90xxxx</code>`,
+    `🎮 <b>Player 面板</b>\n\n` +
+    `Telegram：@${ctx.from.username || '-'}\n` +
+    `Telegram ID：<code>${uid}</code>\n` +
+    `Game ID：<code>${p.game_id || '未提交'}</code>\n` +
+    `Status：${statusText[p.game_id_status] || 'Not submitted'}\n\n` +
+    `👤 Promoter：${p.promoter_name || '-'} (${p.promoter_code || '-'})`,
     { parse_mode: 'HTML' }
   );
 }

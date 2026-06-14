@@ -85,7 +85,12 @@ async function start() {
       if (req.headers['x-telegram-bot-api-secret-token'] !== config.SECRET_TOKEN) {
         return res.status(403).json({ ok: false, error: 'unauthorized' });
       }
-      bot.handleUpdate(req.body, res);
+      // 立即响应 Telegram，避免超时重试
+      res.sendStatus(200);
+      // 异步处理 update
+      setImmediate(() => {
+        bot.handleUpdate(req.body).catch(err => console.error('[WEBHOOK ASYNC]', err.message));
+      });
     });
 
     app.get('/', (_, res) => res.send('Bot is running 24/7 🚀'));

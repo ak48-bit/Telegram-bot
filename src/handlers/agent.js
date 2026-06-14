@@ -42,16 +42,17 @@ async function handleAgent(ctx) {
     const tgLine = pm.telegram_id
       ? `Telegram：@${pm.username || '-'}\nTelegram ID：<code>${pm.telegram_id}</code>`
       : `Telegram：未绑定\n绑定链接：<code>/relink_pm ${pm.promoter_code}</code>`;
-    pmList += `\nAgent：<code>${pm.promoter_code}</code> ${pm.name}\n${tgLine}\nStatus：${statusIcon} ${statusText}\n${pm.promo_url ? 'Promoter 推广链接：已设置' : 'Promoter 推广链接：⛔ 未设'}\n`;
+    const promoLine = pm.promo_url ? `Promoter Link：<code>${pm.promo_url}</code>` : 'Promoter Link：';
+    pmList += `\nAgent：<code>${pm.promoter_code}</code> ${pm.name}\n${tgLine}\nStatus：${statusIcon} ${statusText}\n${promoLine}\n`;
   }
 
   return ctx.reply(
-    `🏢 <b>Agent Menu</b>\n\n` +
-    `🏷️ Code：<code>${a.agent_code}</code>\n` +
-    `👤 Name：${a.name}\n\n` +
-    `📊 Promoters: ${s.active_promoters} active / ${s.promoters} total\n` +
-    `🎮 Players: ${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
-    `<b>📋 Promoter 列表：</b>\n` + (pmList || '暂无 Promoter\n') + '\n' +
+    `🏢 <b>Agent 面板</b>\n\n` +
+    `Agent Code：<code>${a.agent_code}</code>\n` +
+    `Name：${a.name}\n\n` +
+    `Promoters：${s.promoters} total\n` +
+    `Players：${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
+    `<b>Promoter List：</b>` + (pmList || '\n暂无 Promoter') + '\n' +
     `<b>Commands:</b>\n` +
     `/add_promoter B001 Name — 创建 Promoter\n` +
     `/list_my_promoters — 查看下级 Promoter\n` +

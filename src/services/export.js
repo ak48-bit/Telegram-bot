@@ -24,7 +24,7 @@ async function exportAllPlayers() {
       pm.name AS promoter_name,
       a.agent_code,
       a.name AS agent_name,
-      p.created_at
+      TO_CHAR(p.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at
     FROM players p
     LEFT JOIN promoters pm ON p.promoter_id = pm.id
     LEFT JOIN agents a ON p.agent_id = a.id
@@ -51,7 +51,7 @@ async function exportPlayersByAgent(agentTelegramId) {
       pm.name AS promoter_name,
       a.agent_code,
       a.name AS agent_name,
-      p.created_at
+      TO_CHAR(p.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at
     FROM players p
     LEFT JOIN promoters pm ON p.promoter_id = pm.id
     LEFT JOIN agents a ON p.agent_id = a.id
@@ -63,11 +63,15 @@ async function exportPlayersByAgent(agentTelegramId) {
 }
 
 async function sendCSV(ctx, csv, filename) {
-  const buf = Buffer.from('﻿' + csv, 'utf-8');
+  const buf = Buffer.from(csv, 'utf-8');
   await ctx.replyWithDocument(
     { source: buf, filename },
     { caption: `📋 ${filename} — ${new Date().toISOString().slice(0, 10)}` }
-  );
+  ).catch(async (err) => {
+    console.error('[sendCSV]', err.message);
+    // 回退：以文本方式发送
+    await ctx.reply(`📋 <b>Export</b>\n<pre>${csv.slice(0, 3800)}</pre>`, { parse_mode: 'HTML' });
+  });
 }
 
 module.exports = { exportAllPlayers, exportPlayersByAgent, sendCSV };

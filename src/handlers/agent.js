@@ -37,11 +37,12 @@ async function handleAgent(ctx) {
 
   let pmList = '';
   for (const pm of pms.rows) {
-    const status = { active: '✅', blocked: '🚫', pending: '⏳' }[pm.status] || '❓';
-    const tgDisplay = pm.telegram_id
-      ? `@${pm.username || '-'} | <code>${pm.telegram_id}</code>`
-      : '未绑定 — <code>/relink_pm ' + pm.promoter_code + '</code>';
-    pmList += `${status} <code>${pm.promoter_code}</code> ${pm.name} | ${tgDisplay}\n`;
+    const statusIcon = { active: '✅', blocked: '🚫', pending: '⏳' }[pm.status] || '❓';
+    const statusText = { active: 'Active', blocked: 'Blocked', pending: 'Pending' }[pm.status] || 'Unknown';
+    const tgLine = pm.telegram_id
+      ? `Telegram：@${pm.username || '-'}\nTelegram ID：<code>${pm.telegram_id}</code>`
+      : `Telegram：未绑定\n绑定链接：<code>/relink_pm ${pm.promoter_code}</code>`;
+    pmList += `\nAgent：<code>${pm.promoter_code}</code> ${pm.name}\n${tgLine}\nStatus：${statusIcon} ${statusText}\n${pm.promo_url ? 'Promoter 推广链接：已设置' : 'Promoter 推广链接：⛔ 未设'}\n`;
   }
 
   return ctx.reply(

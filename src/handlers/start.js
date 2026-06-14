@@ -74,12 +74,10 @@ async function handleBindToken(ctx, payload, uid) {
 
     if (type === 'promoter_bind') {
       // 绑定 Promoter 身份
-      const ag = await db.query(
-        `SELECT id, agent_code FROM agents WHERE agent_code = $1`, [code.slice(0, code.indexOf('_B') !== -1 ? code.indexOf('_B') + 2 : 4)]
-      );
-      // 从 promoters 表找到对应的 promoter
       const pm = await db.query(
-        `SELECT id, agent_id, agent_code FROM promoters WHERE promoter_code = $1`, [code]
+        `SELECT pm.id, pm.agent_id, a.agent_code, a.name AS agent_name
+         FROM promoters pm JOIN agents a ON pm.agent_id = a.id
+         WHERE pm.promoter_code = $1`, [code]
       );
       if (pm.rows.length === 0) {
         return ctx.reply('⛔ 未找到 Promoter 记录。');
@@ -96,16 +94,13 @@ async function handleBindToken(ctx, payload, uid) {
       );
       await audit.log(uid, 'promoter', 'promoter_bind', 'promoter', code);
 
-      // 获取 agent info
-      const agentInfo = await db.query(
-        `SELECT name FROM agents WHERE id = $1`, [pm.rows[0].agent_id]
-      );
+      const p = pm.rows[0];
 
       return ctx.reply(
         `🎉 <b>Promoter 绑定成功！</b>\n\n` +
         `🏷️ 你的 Promoter Code：<code>${code}</code>\n` +
         `📱 Telegram ID：<code>${uid}</code>\n` +
-        `👤 所属 Agent：${agentInfo.rows[0]?.name || 'N/A'}\n\n` +
+        `👤 所属 Agent：${p.agent_name} (${p.agent_code})\n\n` +
         `<b>可用命令：</b>\n` +
         `/promoter — Promoter 菜单\n` +
         `/my_link — 获取推广链接\n` +

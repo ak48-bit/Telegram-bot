@@ -15,14 +15,16 @@ async function handleAdmin(ctx) {
       (SELECT COUNT(*) FROM promoters WHERE status = 'active') AS active_promoters,
       (SELECT COUNT(*) FROM promoters WHERE status = 'blocked') AS blocked_promoters,
       (SELECT COUNT(*) FROM players) AS players,
-      (SELECT COUNT(*) FROM players WHERE created_at::date = CURRENT_DATE) AS today_players
+      (SELECT COUNT(*) FROM players WHERE created_at::date = CURRENT_DATE) AS today_players,
+      (SELECT COUNT(*) FROM players WHERE game_id IS NOT NULL AND game_id_status = 'pending') AS pending_games
   `);
   const s = stats.rows[0];
   return ctx.reply(
     `📊 <b>Admin Dashboard</b>\n\n` +
     `👥 <b>Agents:</b> ${s.active_agents} active / ${s.blocked_agents} blocked / ${s.agents} total\n` +
     `👤 <b>Promoters:</b> ${s.active_promoters} active / ${s.blocked_promoters} blocked / ${s.promoters} total\n` +
-    `🎮 <b>Players:</b> ${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
+    `🎮 <b>Players:</b> ${s.players} total | 🆕 Today: ${s.today_players}\n` +
+    `⏳ <b>Pending Approvals:</b> ${s.pending_games || 0}\n\n` +
     `<b>Commands:</b>\n` +
     `/add_agent A001 Name — 创建 Agent\n` +
     `/list_agents — 查看所有 Agent\n` +
@@ -31,6 +33,9 @@ async function handleAdmin(ctx) {
     `/block_agent A001 — 封禁 Agent\n` +
     `/block_promoter B001 — 封禁 Promoter\n` +
     `/change_player_owner TGID B001 — 修改玩家归属\n` +
+    `/list_pending — 待审核 Game ID\n` +
+    `/approve_game TGID — 通过审核\n` +
+    `/reject_game TGID — 拒绝审核\n` +
     `/export_players — 导出全部玩家`,
     { parse_mode: 'HTML' }
   );
@@ -237,8 +242,60 @@ async function handleExportPlayers(ctx) {
   }
 }
 
+// /list_pending — 查看待审核的 Game ID
+async function handleListPending(ctx) {
+  const res = await db.query(
+    `SELECT p.telegram_id, u.username, p.game_id, pm.promoter_code, pm.name AS promoter_name,
+            a.agent_code, p.created_at
+     FROM players p
+     LEFT JOIN promoters pm ON p.promoter_id = pm.id
+     LEFT JOIN agents a ON p.agent_id = a.id
+     LEFT JOIN users u ON p.telegram_id = u.telegram_id
+     WHERE p.game_id IS NOT NULL AND p.game_id_status = 'pending'
+     ORDER BY p.created_at DESC LIMIT 30`
+  );
+  if (res.rows.length === 0) return ctx.reply('✅ 暂无待审核的 Game ID。');
+  const lines = ['<b>⏳ 待审核 Game ID</b>\n'];
+  for (const r of res.rows) {
+    lines.push(`TG: <code>${r.telegram_id}</code> | GameID: <code>${r.game_id}</code> | PM: ${r.promoter_code || '-'} | Agent: ${r.agent_code || '-'}`);
+  }
+  lines.push(`\n<b>审批：</b> <code>/approve_game TGID</code> | <code>/reject_game TGID</code>`);
+  return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+}
+
+// /approve_game 1259096820
+async function handleApproveGame(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('格式：<code>/approve_game TGID</code>', { parse_mode: 'HTML' });
+  const tgId = parseInt(parts[1]);
+  if (!tgId) return ctx.reply('无效的 Telegram ID。');
+  const res = await db.query(
+    `UPDATE players SET game_id_status = 'approved', updated_at = NOW() WHERE telegram_id = $1 AND game_id IS NOT NULL`,
+    [tgId]
+  );
+  if (res.rowCount === 0) return ctx.reply(`未找到玩家 <code>${tgId}</code> 或未提交 Game ID。`, { parse_mode: 'HTML' });
+  await audit.log(ctx.from.id, 'admin', 'approve_game', 'player', String(tgId));
+  return ctx.reply(`✅ 玩家 <code>${tgId}</code> Game ID 已通过审核。`, { parse_mode: 'HTML' });
+}
+
+// /reject_game 1259096820
+async function handleRejectGame(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('格式：<code>/reject_game TGID</code>', { parse_mode: 'HTML' });
+  const tgId = parseInt(parts[1]);
+  if (!tgId) return ctx.reply('无效的 Telegram ID。');
+  const res = await db.query(
+    `UPDATE players SET game_id_status = 'rejected', updated_at = NOW() WHERE telegram_id = $1 AND game_id IS NOT NULL`,
+    [tgId]
+  );
+  if (res.rowCount === 0) return ctx.reply(`未找到玩家 <code>${tgId}</code> 或未提交 Game ID。`, { parse_mode: 'HTML' });
+  await audit.log(ctx.from.id, 'admin', 'reject_game', 'player', String(tgId));
+  return ctx.reply(`❌ 玩家 <code>${tgId}</code> Game ID 已拒绝。`, { parse_mode: 'HTML' });
+}
+
 module.exports = {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
   handleListPlayers, handleBlockAgent, handleBlockPromoter,
   handleChangePlayerOwner, handleExportPlayers,
+  handleListPending, handleApproveGame, handleRejectGame,
 };

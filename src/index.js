@@ -8,6 +8,7 @@ const {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
   handleListPlayers, handleBlockAgent, handleBlockPromoter,
   handleChangePlayerOwner, handleExportPlayers,
+  handleListPending, handleApproveGame, handleRejectGame,
 } = require('./handlers/admin');
 const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
@@ -39,6 +40,9 @@ bot.command('block_agent', requireRole('admin'), handleBlockAgent);
 bot.command('block_promoter', requireRole('admin'), handleBlockPromoter);
 bot.command('change_player_owner', requireRole('admin'), handleChangePlayerOwner);
 bot.command('export_players', requireRole('admin'), handleExportPlayers);
+bot.command('list_pending', requireRole('admin'), handleListPending);
+bot.command('approve_game', requireRole('admin'), handleApproveGame);
+bot.command('reject_game', requireRole('admin'), handleRejectGame);
 
 // ── Agent 命令 ───────────────────────────────────────────────────
 bot.command('agent', requireRole('agent'), handleAgent);

@@ -66,7 +66,7 @@ bot.command('submit', requireRole('player', 'admin', 'agent', 'promoter'), handl
 // ── 全局错误处理 ────────────────────────────────────────────────
 bot.catch((err, ctx) => {
   console.error('[TELEGRAF ERROR]', err.message);
-  ctx.reply('系统错误，请稍后重试。').catch(() => {});
+  ctx.reply('System error, please try again later.').catch(() => {});
 });
 
 // ── 启动 ─────────────────────────────────────────────────────────

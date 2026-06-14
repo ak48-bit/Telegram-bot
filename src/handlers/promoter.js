@@ -10,7 +10,7 @@ async function handlePromoter(ctx) {
      WHERE pm.telegram_id = $1 AND pm.status = 'active'`,
     [uid]
   );
-  if (pm.rows.length === 0) return ctx.reply('你还没有绑定 Promoter 身份或已被封禁。');
+  if (pm.rows.length === 0) return ctx.reply('Promoter identity not bound or blocked.');
 
   const p = pm.rows[0];
   const stats = await db.query(
@@ -46,7 +46,7 @@ async function handleMyLink(ctx) {
   const pm = await db.query(
     `SELECT * FROM promoters WHERE telegram_id = $1 AND status = 'active'`, [uid]
   );
-  if (pm.rows.length === 0) return ctx.reply('你还没有绑定 Promoter 身份。');
+  if (pm.rows.length === 0) return ctx.reply('Promoter identity not bound.');
 
   const p = pm.rows[0];
   const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
@@ -56,7 +56,7 @@ async function handleMyLink(ctx) {
   if (p.promo_url) {
     msg += `Promoter Affiliate Link：\n${p.promo_url}\n`;
   } else {
-    msg += `Promoter Affiliate Link：<i>未提交 — /set_promo</i>\n`;
+    msg += `Promoter Affiliate Link：<i>Not submitted — /set_promo</i>\n`;
   }
   msg += `\n<b>Players Bot Share Link：</b>\n` +
     `${link}\n\n` +
@@ -69,7 +69,7 @@ async function handleMyLink(ctx) {
 async function handleMyPlayers(ctx) {
   const uid = ctx.from.id;
   const pm = await db.query('SELECT id FROM promoters WHERE telegram_id = $1', [uid]);
-  if (pm.rows.length === 0) return ctx.reply('未绑定 Promoter。');
+  if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
 
   const parts = ctx.message.text.trim().split(/\s+/);
   let page = 1;
@@ -89,7 +89,7 @@ async function handleMyPlayers(ctx) {
     [pm.rows[0].id, limit, offset]
   );
 
-  if (res.rows.length === 0) return ctx.reply('暂无玩家。');
+  if (res.rows.length === 0) return ctx.reply('No players yet.');
 
   const lines = [`<b>📋 My Players</b> — Page ${page}/${totalPages} (Total: ${total})\n`];
   for (const r of res.rows) {
@@ -103,7 +103,7 @@ async function handleMyPlayers(ctx) {
 async function handleMyToday(ctx) {
   const uid = ctx.from.id;
   const pm = await db.query('SELECT id, promoter_code FROM promoters WHERE telegram_id = $1', [uid]);
-  if (pm.rows.length === 0) return ctx.reply('未绑定 Promoter。');
+  if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
 
   const stats = await db.query(
     `SELECT COUNT(*) AS today,
@@ -116,11 +116,11 @@ async function handleMyToday(ctx) {
   const s = stats.rows[0];
 
   return ctx.reply(
-    `📅 <b>今日数据 — ${new Date().toISOString().slice(0, 10)}</b>\n\n` +
+    `📅 <b>Today Data — ${new Date().toISOString().slice(0, 10)}</b>\n\n` +
     `🏷️ Code：<code>${pm.rows[0].promoter_code}</code>\n\n` +
-    `🆕 今日新增：<b>${s.today}</b>\n` +
-    `📝 已提交 GameID：<b>${s.submitted}</b>\n` +
-    `✅ 已通过：<b>${s.approved}</b>`,
+    `🆕 Today New: <b>${s.today}</b>\n` +
+    `📝 Submitted GameID: <b>${s.submitted}</b>\n` +
+    `✅ Approved: <b>${s.approved}</b>`,
     { parse_mode: 'HTML' }
   );
 }
@@ -130,9 +130,9 @@ async function handleSetPromo(ctx) {
   const uid = ctx.from.id;
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
-  if (parts.length < 2) return ctx.reply('格式：<code>/set_promo http://你的域名.com/?r=你的码</code>', { parse_mode: 'HTML' });
+  if (parts.length < 2) return ctx.reply('Format: <code>/set_promo http://your-domain.com/?r=your_code</code>', { parse_mode: 'HTML' });
   const url = parts[1];
-  if (!url.startsWith('http')) return ctx.reply('❌ 链接必须以 http:// 或 https:// 开头。');
+  if (!url.startsWith('http')) return ctx.reply('❌ URL must start with http:// or https://.');
 
   await db.query(
     `UPDATE promoters SET promo_url = $1, updated_at = NOW() WHERE telegram_id = $2`,
@@ -153,7 +153,7 @@ async function handleShare(ctx) {
   const pm = await db.query(
     `SELECT * FROM promoters WHERE telegram_id = $1 AND status = 'active'`, [uid]
   );
-  if (pm.rows.length === 0) return ctx.reply('未绑定 Promoter。');
+  if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
   const p = pm.rows[0];
   const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
 

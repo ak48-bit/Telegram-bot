@@ -11,7 +11,7 @@ async function handleAgent(ctx) {
     `SELECT a.*, u.first_name FROM agents a JOIN users u ON a.telegram_id = u.telegram_id WHERE a.telegram_id = $1`,
     [uid]
   );
-  if (ag.rows.length === 0) return ctx.reply('你还没有绑定 Agent 身份。');
+  if (ag.rows.length === 0) return ctx.reply('Agent identity not bound.');
 
   const a = ag.rows[0];
   const stats = await db.query(
@@ -41,24 +41,24 @@ async function handleAgent(ctx) {
     const statusText = { active: 'Active', blocked: 'Blocked', pending: 'Pending' }[pm.status] || 'Unknown';
     const tgLine = pm.telegram_id
       ? `Telegram：@${pm.username || '-'}\nTelegram ID：<code>${pm.telegram_id}</code>`
-      : `Telegram：未绑定\n绑定链接：<code>/relink_pm ${pm.promoter_code}</code>`;
+      : `Telegram：Not bound\nBinding link: <code>/relink_pm ${pm.promoter_code}</code>`;
     const promoLine = pm.promo_url ? `Promoter Link：<code>${pm.promo_url}</code>` : 'Promoter Link：';
     pmList += `\nAgent：<code>${pm.promoter_code}</code> ${pm.name}\n${tgLine}\nStatus：${statusIcon} ${statusText}\n${promoLine}\n`;
   }
 
   return ctx.reply(
-    `🏢 <b>Agent 面板</b>\n\n` +
+    `🏢 <b>Agent Panel</b>\n\n` +
     `Agent Code：<code>${a.agent_code}</code>\n` +
     `Name：${a.name}\n\n` +
     `Promoters：${s.promoters} total\n` +
     `Players：${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
-    `<b>Promoter List：</b>` + (pmList || '\n暂无 Promoter') + '\n' +
+    `<b>Promoter List：</b>` + (pmList || '\nNo Promoters') + '\n' +
     `<b>Commands:</b>\n` +
-    `/add_promoter B001 Name — 创建 Promoter\n` +
-    `/list_my_promoters — 查看下级 Promoter\n` +
-    `/relink_pm B001 — 重新生成 Promoter 绑定链接\n` +
-    `/list_my_players — 查看线下玩家\n` +
-    `/export_my_players — 导出玩家`,
+    `/add_promoter B001 Name — Create Promoter\n` +
+    `/list_my_promoters — View Promoters\n` +
+    `/relink_pm B001 — Regenerate Promoter Binding Link\n` +
+    `/list_my_players — View Players\n` +
+    `/export_my_players — Export Players`,
     { parse_mode: 'HTML' }
   );
 }
@@ -69,13 +69,13 @@ async function handleAddPromoter(ctx) {
 
   // 查找 Agent
   const ag = await db.query('SELECT * FROM agents WHERE telegram_id = $1 AND status = $2', [uid, 'active']);
-  if (ag.rows.length === 0) return ctx.reply('你还没有绑定 Agent 身份或已被封禁。');
+  if (ag.rows.length === 0) return ctx.reply('Agent identity not bound or blocked.');
 
   const agent = ag.rows[0];
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
   if (parts.length < 3) {
-    return ctx.reply('格式：<code>/add_promoter B001 Tom</code>', { parse_mode: 'HTML' });
+    return ctx.reply('Format: <code>/add_promoter B001 Tom</code>', { parse_mode: 'HTML' });
   }
 
   const promoterCode = parts[1];
@@ -84,7 +84,7 @@ async function handleAddPromoter(ctx) {
   // 检查 promoter_code 唯一
   const exists = await db.query('SELECT 1 FROM promoters WHERE promoter_code = $1', [promoterCode]);
   if (exists.rows.length > 0) {
-    return ctx.reply(`❌ Promoter Code <code>${promoterCode}</code> 已存在。`, { parse_mode: 'HTML' });
+    return ctx.reply(`❌ Promoter Code <code>${promoterCode}</code> already exists.`, { parse_mode: 'HTML' });
   }
 
   // 创建 promoter
@@ -124,7 +124,7 @@ async function handleAddPromoter(ctx) {
 async function handleListMyPromoters(ctx) {
   const uid = ctx.from.id;
   const ag = await db.query('SELECT id FROM agents WHERE telegram_id = $1', [uid]);
-  if (ag.rows.length === 0) return ctx.reply('未绑定 Agent。');
+  if (ag.rows.length === 0) return ctx.reply('Not bound Agent。');
 
   const res = await db.query(
     `SELECT pm.*, u.username, u.first_name
@@ -132,12 +132,12 @@ async function handleListMyPromoters(ctx) {
      WHERE pm.agent_id = $1 ORDER BY pm.created_at DESC`,
     [ag.rows[0].id]
   );
-  if (res.rows.length === 0) return ctx.reply('暂无 Promoter。');
+  if (res.rows.length === 0) return ctx.reply('No Promoters。');
 
   const lines = ['<b>📋 My Promoters</b>\n'];
   for (const r of res.rows) {
     const status = { active: '✅', blocked: '🚫', pending: '⏳' }[r.status] || '❓';
-    const tg = r.telegram_id ? `<code>${r.telegram_id}</code>` : '未绑定';
+    const tg = r.telegram_id ? `<code>${r.telegram_id}</code>` : 'Not bound';
     const countRes = await db.query(
       'SELECT COUNT(*) FROM players WHERE promoter_id = $1', [r.id]
     );
@@ -151,7 +151,7 @@ async function handleListMyPromoters(ctx) {
 async function handleListMyPlayers(ctx) {
   const uid = ctx.from.id;
   const ag = await db.query('SELECT id FROM agents WHERE telegram_id = $1', [uid]);
-  if (ag.rows.length === 0) return ctx.reply('未绑定 Agent。');
+  if (ag.rows.length === 0) return ctx.reply('Not bound Agent。');
 
   const parts = ctx.message.text.trim().split(/\s+/);
   let page = 1;
@@ -173,7 +173,7 @@ async function handleListMyPlayers(ctx) {
     [ag.rows[0].id, limit, offset]
   );
 
-  if (res.rows.length === 0) return ctx.reply('暂无玩家。');
+  if (res.rows.length === 0) return ctx.reply('No players yet.');
 
   const lines = [`<b>📋 My Players</b> — Page ${page}/${totalPages} (Total: ${total})\n`];
   for (const r of res.rows) {
@@ -187,22 +187,22 @@ async function handleListMyPlayers(ctx) {
 async function handleExportMyPlayers(ctx) {
   try {
     const csv = await exportPlayersByAgent(ctx.from.id);
-    await exportWithSummary(ctx, csv, 'Agent 线下玩家导出');
+    await exportWithSummary(ctx, csv, 'Agent Players Export');
     await audit.log(ctx.from.id, 'agent', 'export_players', 'players', 'my_line');
   } catch (e) {
     console.error('[Export Agent]', e);
-    return ctx.reply('导出失败：' + e.message);
+    return ctx.reply('Export failed: ' + e.message);
   }
 }
 
-// /relink_pm B001 — 重新生成 Promoter 绑定链接
+// /relink_pm B001 — Regenerate Promoter Binding Link
 async function handleRelinkPromoter(ctx) {
   const uid = ctx.from.id;
   const ag = await db.query('SELECT * FROM agents WHERE telegram_id = $1', [uid]);
-  if (ag.rows.length === 0) return ctx.reply('未绑定 Agent。');
+  if (ag.rows.length === 0) return ctx.reply('Not bound Agent。');
 
   const parts = ctx.message.text.trim().split(/\s+/);
-  if (parts.length < 2) return ctx.reply('格式：<code>/relink_pm B001</code>', { parse_mode: 'HTML' });
+  if (parts.length < 2) return ctx.reply('Format: <code>/relink_pm B001</code>', { parse_mode: 'HTML' });
   const code = parts[1];
 
   // 检查 Promoter 是否属于该 Agent
@@ -210,7 +210,7 @@ async function handleRelinkPromoter(ctx) {
     `SELECT * FROM promoters WHERE promoter_code = $1 AND agent_id = $2`,
     [code, ag.rows[0].id]
   );
-  if (pm.rows.length === 0) return ctx.reply(`❌ Promoter <code>${code}</code> 未找到或不属于你。`, { parse_mode: 'HTML' });
+  if (pm.rows.length === 0) return ctx.reply(`❌ Promoter <code>${code}</code> not found or not under you.`, { parse_mode: 'HTML' });
 
   // 禁用旧的未使用 token
   await db.query(
@@ -229,7 +229,7 @@ async function handleRelinkPromoter(ctx) {
     `🏷️ Code：<code>${code}</code>\n` +
     `👤 Name：${pm.rows[0].name}\n\n` +
     `<code>${link}</code>\n\n` +
-    `⚠️ 旧链接已失效，此链接只能使用一次，有效期48小时。`,
+    `⚠️ Old link invalidated. One-time use, 48h valid.`,
     { parse_mode: 'HTML' }
   );
 }

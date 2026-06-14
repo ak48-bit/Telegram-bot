@@ -34,12 +34,12 @@ async function handleBindToken(ctx, payload, uid) {
 
     if (!result) {
       return ctx.reply(
-        '⛔ 此绑定链接无效或已过期。\n\n' +
-        '可能原因：\n' +
-        '• 链接已被使用\n' +
-        '• 链接已过期（有效期48小时）\n' +
-        '• 链接被撤销\n\n' +
-        '请联系你的上级重新获取绑定链接。'
+        '⛔ This binding link is invalid or expired.\n\n' +
+        'Possible reasons:\n' +
+        '• Link already used\n' +
+        '• Link expired (valid 48 hours)\n' +
+        '• Link has been revoked\n\n' +
+        'Please contact your upline for a new binding link.'
       );
     }
 
@@ -76,7 +76,7 @@ async function handleBindToken(ctx, payload, uid) {
          WHERE pm.promoter_code = $1`, [code]
       );
       if (pm.rows.length === 0) {
-        return ctx.reply('⛔ 未找到 Promoter 记录。');
+        return ctx.reply('⛔ Promoter record not found.');
       }
       await db.query(
         `UPDATE users SET role = 'promoter', status = 'active', updated_at = NOW()
@@ -103,7 +103,7 @@ async function handleBindToken(ctx, payload, uid) {
     }
   } catch (e) {
     console.error('[BindToken]', e);
-    return ctx.reply('系统错误，请联系管理员。');
+    return ctx.reply('System error, please contact admin.');
   }
 }
 
@@ -122,20 +122,20 @@ async function handlePlayerEntry(ctx, payload, uid) {
   );
 
   if (pm.rows.length === 0) {
-    return ctx.reply('⛔ 推广链接无效。');
+    return ctx.reply('⛔ Invalid referral link.');
   }
 
   const promoter = pm.rows[0];
 
   // 检查 Promoter 是否被封禁
   if (promoter.status === 'blocked') {
-    return ctx.reply('🚫 该推广链接已暂停。');
+    return ctx.reply('🚫 This referral link has been suspended.');
   }
 
   // 检查 Agent 是否被封禁
   const ag = await db.query('SELECT status FROM agents WHERE id = $1', [promoter.agent_id]);
   if (ag.rows.length > 0 && ag.rows[0].status === 'blocked') {
-    return ctx.reply('🚫 该推广链接已暂停。');
+    return ctx.reply('🚫 This referral link has been suspended.');
   }
 
   // 检查玩家是否已绑定过来源
@@ -150,9 +150,9 @@ async function handlePlayerEntry(ctx, payload, uid) {
       `SELECT promoter_code FROM promoters WHERE id = $1`, [p.promoter_id]
     );
     return ctx.reply(
-      `⚠️ 你已经绑定过推广来源。\n\n` +
-      `当前归属 Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\n` +
-      `如需修改归属，请联系客服。`
+      `⚠️ You already have a referral source.\n\n` +
+      `Current Promoter: <code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\n` +
+      `To change, please contact customer service.`
     );
   }
 
@@ -185,14 +185,14 @@ async function handlePlayerEntry(ctx, payload, uid) {
 
 async function handlePlainStart(ctx, user) {
   const roleTexts = {
-    admin: `👑 <b>Admin 面板</b>\n\n/admin — 管理菜单`,
-    agent: `🏢 <b>Agent 面板</b>\n\n/agent — 查看菜单`,
-    promoter: `📢 <b>Promoter 面板</b>\n\n/promoter — 查看菜单`,
-    player: `🎮 <b>玩家面板</b>\n\n/submit 游戏ID — 提交游戏 ID\n/my — 查看我的资料`,
+    admin: `👑 <b>Admin Panel</b>\n\n/admin — Admin Menu`,
+    agent: `🏢 <b>Agent Panel</b>\n\n/agent — View Menu`,
+    promoter: `📢 <b>Promoter Panel</b>\n\n/promoter — View Menu`,
+    player: `🎮 <b>Player Panel</b>\n\n/submit 游戏ID — Submit Game ID\n/my — View My Info`,
   };
 
   const text = roleTexts[user.role] ||
-    `🤖 <b>欢迎使用推广 Bot</b>\n\n如果你有推广链接，请通过链接进入。`;
+    `🤖 <b>Welcome to Referral Bot</b>\n\nIf you have a referral link, please use it to enter.`;
 
   return ctx.reply(text, { parse_mode: 'HTML' });
 }

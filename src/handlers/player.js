@@ -7,14 +7,14 @@ async function handleSubmit(ctx) {
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
   if (parts.length < 2) {
-    return ctx.reply('格式：<code>/submit PH90123456</code>', { parse_mode: 'HTML' });
+    return ctx.reply('Format: <code>/submit PH90123456</code>', { parse_mode: 'HTML' });
   }
   const gameId = parts[1];
 
   // 检查玩家
   const player = await db.query('SELECT * FROM players WHERE telegram_id = $1', [uid]);
   if (player.rows.length === 0) {
-    return ctx.reply('请先通过推广链接进入 Bot。');
+    return ctx.reply('Please enter through a referral link first.');
   }
 
   // 自动去重：检查 game_id 是否已被提交
@@ -61,7 +61,7 @@ async function handlePlayerMy(ctx) {
   );
 
   if (player.rows.length === 0) {
-    return ctx.reply('你还没有绑定推广来源。请通过推广链接进入 Bot。');
+    return ctx.reply('No referral source bound. Please enter through a referral link.');
   }
 
   const p = player.rows[0];
@@ -72,7 +72,7 @@ async function handlePlayerMy(ctx) {
     `🎮\n\n` +
     `Telegram：@${ctx.from.username || '-'}\n` +
     `Telegram ID：<code>${uid}</code>\n` +
-    `Game ID：<code>${p.game_id || '未提交'}</code>\n` +
+    `Game ID：<code>${p.game_id || 'Not submitted'}</code>\n` +
     `Status：${st}\n\n` +
     `👤 Promoter：${p.promoter_name || '-'} (${p.promoter_code || '-'})`,
     { parse_mode: 'HTML' }

@@ -28,7 +28,7 @@ async function ensureUser(ctx, next) {
  */
 async function checkBlocked(ctx, next) {
   if (ctx.state.user?.status === 'blocked') {
-    return ctx.reply('🚫 你的账号已被封禁。');
+    return ctx.reply('🚫 Your account has been blocked。');
   }
   return next();
 }
@@ -39,21 +39,21 @@ async function checkBlocked(ctx, next) {
 function requireRole(...roles) {
   return async (ctx, next) => {
     const user = ctx.state.user;
-    if (!user) return ctx.reply('请先 /start。');
+    if (!user) return ctx.reply('Please /start first.');
     if (!roles.includes(user.role)) {
-      return ctx.reply('⛔ 你没有权限执行此操作。');
+      return ctx.reply('⛔ You do not have permission.');
     }
     // 额外：检查 agent/promoter 的 status
     if (user.role === 'agent') {
       const ag = await db.query('SELECT status FROM agents WHERE telegram_id = $1', [user.telegram_id]);
       if (ag.rows.length > 0 && ag.rows[0].status === 'blocked') {
-        return ctx.reply('🚫 你的 Agent 账号已被封禁。');
+        return ctx.reply('🚫 Your Agent account has been blocked.');
       }
     }
     if (user.role === 'promoter') {
       const pm = await db.query('SELECT status FROM promoters WHERE telegram_id = $1', [user.telegram_id]);
       if (pm.rows.length > 0 && pm.rows[0].status === 'blocked') {
-        return ctx.reply('🚫 你的 Promoter 账号已被封禁。');
+        return ctx.reply('🚫 Your Promoter account has been blocked.');
       }
     }
     return next();

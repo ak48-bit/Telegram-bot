@@ -99,15 +99,15 @@ async function exportWithSummary(ctx, csv, title) {
   // 摘要
   let summary = `📊 <b>${title}</b>\n`;
   summary += `━━━━━━━━━━━━━━\n`;
-  summary += `🎮 总玩家：<b>${total}</b>\n`;
-  summary += `✅ 已通过：${byStatus.approved} | ⏳ 待审核：${byStatus.pending} | ❌ 未通过：${byStatus.rejected}\n`;
-  summary += `\n<b>按 Promoter：</b>\n`;
+  summary += `🎮 Total Players: <b>${total}</b>\n`;
+  summary += `✅ Approved: ${byStatus.approved} | ⏳ Pending: ${byStatus.pending} | ❌ Rejected: ${byStatus.rejected}\n`;
+  summary += `\n<b>By Promoter: </b>\n`;
   for (const [pm, n] of Object.entries(byPromoter).slice(0, 10)) {
-    summary += `  <code>${pm}</code>: ${n} 人\n`;
+    summary += `  <code>${pm}</code>: ${n}  ppl\n`;
   }
-  summary += `\n<b>按 Agent：</b>\n`;
+  summary += `\n<b>By Agent: </b>\n`;
   for (const [ag, n] of Object.entries(byAgent)) {
-    summary += `  <code>${ag}</code>: ${n} 人\n`;
+    summary += `  <code>${ag}</code>: ${n}  ppl\n`;
   }
 
   // 表格（最多展示20行）
@@ -116,11 +116,11 @@ async function exportWithSummary(ctx, csv, title) {
     return `${cols[0]?.padEnd(12) || '-'} ${cols[1]?.padEnd(15) || '-'} ${cols[2]?.padEnd(12) || '-'} ${cols[3]?.padEnd(10) || '-'} ${cols[5]?.padEnd(12) || '-'} ${cols[7]?.padEnd(8) || '-'}`;
   });
 
-  summary += `\n<b>📋 最近记录：</b>\n`;
+  summary += `\n<b>📋 Recent Records: </b>\n`;
   summary += `<pre>TG_ID        Username        GameID       Status     Promoter     Agent\n`;
   summary += display.map(d => d.slice(0, 90)).join('\n');
   summary += `</pre>`;
-  if (total > 20) summary += `<i>... 还有 ${total - 20} 条，详见 CSV 文件</i>\n`;
+  if (total > 20) summary += `<i>... +${total - 20} more in CSV</i>\n`;
 
   await ctx.reply(summary, { parse_mode: 'HTML' });
 

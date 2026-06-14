@@ -21,22 +21,21 @@ async function handlePromoter(ctx) {
     [p.id]
   );
   const s = stats.rows[0];
+  const promoLine = p.promo_url
+    ? `Promoter Link：<code>${p.promo_url}</code>`
+    : 'Promoter Link：';
 
   return ctx.reply(
-    `📢 <b>Promoter Menu</b>\n\n` +
-    `🏷️ Code：<code>${p.promoter_code}</code>\n` +
-    `👤 Name：${p.name}\n` +
-    `📱 TG ID：<code>${uid}</code>\n` +
-    `🏢 绑定 Agent：${p.agent_code} (${p.agent_name})\n` +
-    `🔗 推广链接：${p.promo_url ? '<code>' + p.promo_url + '</code>' : '未设置 — /set_promo'}\n\n` +
-    `🎮 My Players: ${s.total} total | 🆕 Today: ${s.today}\n` +
-    `✅ Approved: ${s.approved || 0}\n\n` +
-    `<b>Commands:</b>\n` +
-    `/set_promo http://域名.com/?r=你的码 — 设置推广链接\n` +
-    `/my_link — 获取玩家推广链接\n` +
-    `/my_players — 查看我的玩家\n` +
-    `/my_today — 今日数据\n` +
-    `/share — 生成分享文案`,
+    `📢 <b>Promoter 面板</b>\n\n` +
+    `Upline Agent：<code>${p.agent_code}</code>\n\n` +
+    `Promoter Code：<code>${p.promoter_code}</code>\n` +
+    `Name：${p.name}\n` +
+    `Telegram：@${ctx.from.username || '-'}\n` +
+    `Telegram ID：<code>${uid}</code>\n` +
+    `${promoLine}\n` +
+    `Status：${p.promo_url ? '✅ Active' : '未提交 — /set_promo'}\n\n` +
+    `Players：${s.total} total | 🆕 Today: ${s.today}\n\n` +
+    `/set_promo | /my_link | /my_players | /my_today | /share`,
     { parse_mode: 'HTML' }
   );
 }

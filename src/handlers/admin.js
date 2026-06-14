@@ -1,7 +1,7 @@
 const db = require('../db');
 const { createInviteToken } = require('../services/token');
 const audit = require('../services/audit');
-const { exportAllPlayers, sendCSV } = require('../services/export');
+const { exportAllPlayers, sendCSV, exportWithSummary } = require('../services/export');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 
@@ -229,11 +229,11 @@ async function handleChangePlayerOwner(ctx) {
 async function handleExportPlayers(ctx) {
   try {
     const csv = await exportAllPlayers();
-    await sendCSV(ctx, csv, `players_all_${Date.now()}.csv`);
+    await exportWithSummary(ctx, csv, '全部玩家数据导出');
     await audit.log(ctx.from.id, 'admin', 'export_players', 'players', 'all');
   } catch (e) {
     console.error('[Export]', e);
-    return ctx.reply('导出失败，请联系管理员。');
+    return ctx.reply('导出失败：' + e.message);
   }
 }
 

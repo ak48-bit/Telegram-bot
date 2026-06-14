@@ -69,9 +69,63 @@ async function sendCSV(ctx, csv, filename) {
     { caption: `📋 ${filename} — ${new Date().toISOString().slice(0, 10)}` }
   ).catch(async (err) => {
     console.error('[sendCSV]', err.message);
-    // 回退：以文本方式发送
     await ctx.reply(`📋 <b>Export</b>\n<pre>${csv.slice(0, 3800)}</pre>`, { parse_mode: 'HTML' });
   });
 }
 
-module.exports = { exportAllPlayers, exportPlayersByAgent, sendCSV };
+/**
+ * 生成摘要 + 发送文件 + 表格
+ */
+async function exportWithSummary(ctx, csv, title) {
+  const rows = csv.split('\n').filter(Boolean);
+  const headers = rows[0]?.split(',') || [];
+  const data = rows.slice(1);
+
+  // 统计
+  const total = data.length;
+  const byPromoter = {};
+  const byAgent = {};
+  const byStatus = { pending: 0, approved: 0, rejected: 0 };
+  data.forEach(line => {
+    const cols = line.split(',');
+    const pm = cols[4] || '-';
+    const ag = cols[6] || '-';
+    const st = cols[3] || 'pending';
+    byPromoter[pm] = (byPromoter[pm] || 0) + 1;
+    byAgent[ag] = (byAgent[ag] || 0) + 1;
+    if (byStatus[st] !== undefined) byStatus[st]++;
+  });
+
+  // 摘要
+  let summary = `📊 <b>${title}</b>\n`;
+  summary += `━━━━━━━━━━━━━━\n`;
+  summary += `🎮 总玩家：<b>${total}</b>\n`;
+  summary += `✅ 已通过：${byStatus.approved} | ⏳ 待审核：${byStatus.pending} | ❌ 未通过：${byStatus.rejected}\n`;
+  summary += `\n<b>按 Promoter：</b>\n`;
+  for (const [pm, n] of Object.entries(byPromoter).slice(0, 10)) {
+    summary += `  <code>${pm}</code>: ${n} 人\n`;
+  }
+  summary += `\n<b>按 Agent：</b>\n`;
+  for (const [ag, n] of Object.entries(byAgent)) {
+    summary += `  <code>${ag}</code>: ${n} 人\n`;
+  }
+
+  // 表格（最多展示20行）
+  const display = data.slice(0, 20).map(line => {
+    const cols = line.split(',');
+    return `${cols[0]?.padEnd(12) || '-'} ${cols[1]?.padEnd(15) || '-'} ${cols[2]?.padEnd(12) || '-'} ${cols[3]?.padEnd(10) || '-'} ${cols[5]?.padEnd(12) || '-'} ${cols[7]?.padEnd(8) || '-'}`;
+  });
+
+  summary += `\n<b>📋 最近记录：</b>\n`;
+  summary += `<pre>TG_ID        Username        GameID       Status     Promoter     Agent\n`;
+  summary += display.map(d => d.slice(0, 90)).join('\n');
+  summary += `</pre>`;
+  if (total > 20) summary += `<i>... 还有 ${total - 20} 条，详见 CSV 文件</i>\n`;
+
+  await ctx.reply(summary, { parse_mode: 'HTML' });
+
+  // 发送 CSV 文件
+  await sendCSV(ctx, csv, title.replace(/\s/g, '_') + '.csv');
+}
+
+module.exports = { exportAllPlayers, exportPlayersByAgent, sendCSV, exportWithSummary };

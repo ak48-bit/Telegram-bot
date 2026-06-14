@@ -1,7 +1,7 @@
 const db = require('../db');
 const { createInviteToken } = require('../services/token');
 const audit = require('../services/audit');
-const { exportPlayersByAgent, sendCSV } = require('../services/export');
+const { exportPlayersByAgent, sendCSV, exportWithSummary } = require('../services/export');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 
@@ -155,11 +155,11 @@ async function handleListMyPlayers(ctx) {
 async function handleExportMyPlayers(ctx) {
   try {
     const csv = await exportPlayersByAgent(ctx.from.id);
-    await sendCSV(ctx, csv, `players_agent_${Date.now()}.csv`);
+    await exportWithSummary(ctx, csv, 'Agent 线下玩家导出');
     await audit.log(ctx.from.id, 'agent', 'export_players', 'players', 'my_line');
   } catch (e) {
     console.error('[Export Agent]', e);
-    return ctx.reply('导出失败。');
+    return ctx.reply('导出失败：' + e.message);
   }
 }
 

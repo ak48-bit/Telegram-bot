@@ -1,4 +1,5 @@
 const db = require('../db');
+const audit = require('../services/audit');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 
@@ -21,9 +22,9 @@ async function handlePromoter(ctx) {
     [p.id]
   );
   const s = stats.rows[0];
-  const promoLine = p.promo_url
-    ? `Promoter Affiliate Link：\n${p.promo_url}`
-    : 'Promoter Affiliate Link：';
+  const linkStatus = p.link_status === 'BOUND'
+    ? `Player Affiliate Link：\n${p.player_affiliate_link}`
+    : 'Player Affiliate Link：Not Submitted — /set_promo';
 
   return ctx.reply(
     `📢 <b>Promoter</b>\n\n` +
@@ -32,10 +33,10 @@ async function handlePromoter(ctx) {
     `Name：${p.name}\n` +
     `Telegram：@${ctx.from.username || '-'}\n` +
     `Telegram ID：<code>${uid}</code>\n` +
-    `${promoLine}\n` +
-    `Status：${p.promo_url ? '✅ Active' : 'Not Submitted — /set_promo'}\n\n` +
+    `${linkStatus}\n` +
+    `Link Status：${p.link_status || 'NOT_SUBMITTED'}\n\n` +
     `Players：${s.total} total | 🆕 Today: ${s.today}\n\n` +
-    `/set_promo | /my_link | /my_players | /my_today | /share`,
+    `/my_link | /set_promo | /my_players | /my_today | /share`,
     { parse_mode: 'HTML' }
   );
 }
@@ -53,10 +54,10 @@ async function handleMyLink(ctx) {
 
   let msg = `📢 <b>Promoter Affiliate Link</b>\n\n` +
     `Promoter Code：<code>${p.promoter_code}</code>\n`;
-  if (p.promo_url) {
-    msg += `Promoter Affiliate Link：\n${p.promo_url}\n`;
+  if (p.link_status === 'BOUND' && p.player_affiliate_link) {
+    msg += `Player Affiliate Link：\n${p.player_affiliate_link}\n`;
   } else {
-    msg += `Promoter Affiliate Link：<i>Not submitted — /set_promo</i>\n`;
+    msg += `Player Affiliate Link：<i>Not Submitted — /set_promo</i>\n`;
   }
   msg += `\n<b>Players Bot Share Link：</b>\n` +
     `${link}\n\n` +
@@ -130,21 +131,50 @@ async function handleSetPromo(ctx) {
   const uid = ctx.from.id;
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/set_promo http://your-domain.com/?r=your_code</code>', { parse_mode: 'HTML' });
+  if (parts.length < 2) {
+    return ctx.reply('Format: <code>/set_promo http://your-domain.com/?r=your_code</code>', { parse_mode: 'HTML' });
+  }
   const url = parts[1];
-  if (!url.startsWith('http')) return ctx.reply('❌ URL must start with http:// or https://.');
 
-  await db.query(
-    `UPDATE promoters SET promo_url = $1, updated_at = NOW() WHERE telegram_id = $2`,
+  // 1. 格式校验
+  if (!url.startsWith('http')) {
+    await audit.log(uid, 'promoter', 'submit_invalid_link', 'promoter', null, { url, reason: 'invalid_format' });
+    return ctx.reply('Invalid link format.');
+  }
+
+  // 2. 查找当前 Promoter
+  const pm = await db.query(
+    `SELECT * FROM promoters WHERE telegram_id = $1`,
+    [uid]
+  );
+  if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
+
+  const promoter = pm.rows[0];
+
+  // 3. 如果已经是 BOUND 且有链接 → 拒绝
+  if (promoter.link_status === 'BOUND' && promoter.player_affiliate_link) {
+    await audit.log(uid, 'promoter', 'submit_duplicate_own', 'promoter', promoter.promoter_code, { url });
+    return ctx.reply('You have already submitted your Player Affiliate Link.');
+  }
+
+  // 4. 检查唯一性（其他 Promoter 是否已用）
+  const dup = await db.query(
+    `SELECT promoter_code FROM promoters WHERE player_affiliate_link = $1 AND telegram_id != $2`,
     [url, uid]
   );
-  return ctx.reply(
-    `📢 <b>Promoter Sets Up Promotion Link</b>\n\n` +
-    `<code>/set_promo ${url}</code>\n\n` +
-    `✅ Promoter Affiliate Link set!\n\n` +
-    `${url}`,
-    { parse_mode: 'HTML' }
+  if (dup.rows.length > 0) {
+    await audit.log(uid, 'promoter', 'submit_duplicate_link', 'promoter', promoter.promoter_code, { url, conflict_with: dup.rows[0].promoter_code });
+    return ctx.reply('This link has already been used.');
+  }
+
+  // 5. 保存成功
+  await db.query(
+    `UPDATE promoters SET player_affiliate_link = $1, link_status = 'BOUND', updated_at = NOW() WHERE telegram_id = $2`,
+    [url, uid]
   );
+  await audit.log(uid, 'promoter', 'submit_link_success', 'promoter', promoter.promoter_code, { url });
+
+  return ctx.reply('Submitted Successfully\nPromoter Link Bound Successfully');
 }
 
 // /share — 生成分享文案
@@ -157,13 +187,20 @@ async function handleShare(ctx) {
   const p = pm.rows[0];
   const link = `https://t.me/${BOT_USERNAME}?start=p_${p.promoter_code}`;
 
+  // 只有 BOUND 状态才显示完整分享文案
+  if (p.link_status !== 'BOUND' || !p.player_affiliate_link) {
+    return ctx.reply(
+      `⚠️ You must submit your Player Affiliate Link first.\n\n` +
+      `Use /set_promo to submit.`,
+      { parse_mode: 'HTML' }
+    );
+  }
+
   let msg = `📋 <b>Promoter Sharing Message</b>\n\n`;
   msg += `  Copy the following message and send it to players：\n\n`;
   msg += `  🎰 Share + Signup Reward\n`;
   msg += `  ━━━━━━━━━━━━━━━\n`;
-  if (p.promo_url) {
-    msg += `  Promoter Affiliate Link：\n  ${p.promo_url}\n\n`;
-  }
+  msg += `  Promoter Affiliate Link：\n  ${p.player_affiliate_link}\n\n`;
   msg += `  📋 Promoter Bot Link：\n` +
     `  ${link}\n` +
     `  ━━━━━━━━━━━━━━━\n` +

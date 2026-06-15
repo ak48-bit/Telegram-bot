@@ -35,7 +35,7 @@ async function useInviteToken(token, telegramId) {
 
     const res = await client.query(
       `SELECT * FROM invite_tokens
-       WHERE token = $1 AND is_used = FALSE AND expires_at > NOW()
+       WHERE token = $1 AND expires_at > NOW()
        FOR UPDATE`,
       [token]
     );

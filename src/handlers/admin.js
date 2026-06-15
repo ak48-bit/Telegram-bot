@@ -85,7 +85,7 @@ async function handleAddAgent(ctx) {
     `📋 Agent Bot Link：\n` +
     `${link}\n` +
     `━━━━━━━━━━━━━━━\n\n` +
-    `⚠️ One-time use only, no expiry\n\n` +
+    `⚠️ No expiry, unlimited use\n\n` +
     `<i>After binding, Agent must use /set_promo to submit their Affiliate Link.</i>`,
     { parse_mode: 'HTML' }
   );
@@ -314,7 +314,7 @@ async function handleRelinkAgent(ctx) {
   const token = await createInviteToken('agent_bind', code, ctx.from.id);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
   await audit.log(ctx.from.id, 'admin', 'relink_agent', 'agent', code);
-  return ctx.reply(`🔗 <b>Agent Binding Link (New)</b>\n\nCode：<code>${code}</code>\n\n<code>${link}</code>\n\n⚠️ Old link invalidated. One-time use, no expiry.`, { parse_mode: 'HTML' });
+  return ctx.reply(`🔗 <b>Agent Binding Link (New)</b>\n\nCode：<code>${code}</code>\n\n<code>${link}</code>\n\n⚠️ Old link invalidated. No expiry, unlimited use.`, { parse_mode: 'HTML' });
 }
 
 // /reset_agent_link AgentCode

@@ -93,7 +93,7 @@ async function executeConfirmedAction(ctx, s) {
       await audit.log(uid, 'admin', 'step_create_agent_confirmed', 'agent', agentCode, { name });
       session.delete(uid);
       return ctx.editMessageText(
-        `Agent Created Successfully\nAgent Code: ${agentCode}\nName: ${name}\n\nAgent Bot Link:\n${link}\n\n⚠️ One-time use, no expiry.\nAfter binding, use /set_agent_link.`,
+        `Agent Created Successfully\nAgent Code: ${agentCode}\nName: ${name}\n\nAgent Bot Link:\n${link}\n\n⚠️ No expiry, unlimited use.\nAfter binding, use /set_agent_link.`,
         { parse_mode: 'HTML' }
       ).catch(() => {});
     }
@@ -111,7 +111,7 @@ async function executeConfirmedAction(ctx, s) {
       await audit.log(uid, 'agent', 'step_create_promoter_confirmed', 'promoter', promoterCode, { name });
       session.delete(uid);
       return ctx.editMessageText(
-        `Promoter Created Successfully\nPromoter Code: ${promoterCode}\nName: ${name}\n\nPromoter Bot Link:\n${link}\n\n⚠️ One-time use, no expiry. After binding, use /set_player_link.`,
+        `Promoter Created Successfully\nPromoter Code: ${promoterCode}\nName: ${name}\n\nPromoter Bot Link:\n${link}\n\n⚠️ No expiry, unlimited use. After binding, use /set_player_link.`,
         { parse_mode: 'HTML' }
       ).catch(() => {});
     }

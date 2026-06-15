@@ -25,7 +25,7 @@ async function initDB() {
   const oldCheck = await query(
     `SELECT column_name FROM information_schema.columns
      WHERE table_name = 'users' AND column_name = 'ref_code'`
-  ).catch(() => ({ rows: [] }));
+  );
   if (oldCheck.rows.length > 0) {
     console.log('[DB] Old Python bot users table — renaming to users_old');
     await query('ALTER TABLE IF EXISTS users RENAME TO users_old').catch(() => {});
@@ -135,60 +135,60 @@ async function initDB() {
   `;
   await query(sql);
 
-  // Migration: add new columns if upgrading from old schema
-  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_original TEXT").catch(() => {});
-  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_normalized TEXT").catch(() => {});
-  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'").catch(() => {});
-  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_original TEXT").catch(() => {});
-  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_normalized TEXT").catch(() => {});
-  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_referral_token TEXT").catch(() => {});
-  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'").catch(() => {});
-  await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT").catch(() => {});
+  // Migration: add new columns (IF NOT EXISTS = idempotent, real errors will throw)
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_original TEXT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_normalized TEXT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_original TEXT");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_normalized TEXT");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_referral_token TEXT");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'");
+  await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT");
 
-  // Migrate old data — detect conflicts first
+  // Migrate old data — fail on conflict so admin can resolve manually
   const agentConflicts = await query(
     `SELECT agent_link_original, COUNT(*) FROM agents WHERE agent_link_original IS NOT NULL AND agent_link_normalized IS NULL GROUP BY agent_link_original HAVING COUNT(*) > 1`
-  ).catch(() => ({ rows: [] }));
+  );
   if (agentConflicts.rows.length > 0) {
-    console.log('[DB] WARNING: Duplicate agent_link_original found. Please resolve manually:');
-    agentConflicts.rows.forEach(r => console.log('  ', r.agent_link_original, 'count:', r.count));
-  } else {
-    await query("UPDATE agents SET agent_link_normalized = agent_link_original WHERE agent_link_original IS NOT NULL AND agent_link_normalized IS NULL").catch(() => {});
+    console.error('[DB] FATAL: Duplicate agent_link_original detected. Resolve manually then restart.');
+    agentConflicts.rows.forEach(r => console.error('  DUPLICATE:', r.agent_link_original, 'x' + r.count));
+    throw new Error('Duplicate agent_link_original — cannot auto-migrate.');
   }
+  await query("UPDATE agents SET agent_link_normalized = agent_link_original WHERE agent_link_original IS NOT NULL AND agent_link_normalized IS NULL");
 
   const pmConflicts = await query(
     `SELECT player_affiliate_link_original, COUNT(*) FROM promoters WHERE player_affiliate_link_original IS NOT NULL AND player_affiliate_link_normalized IS NULL GROUP BY player_affiliate_link_original HAVING COUNT(*) > 1`
-  ).catch(() => ({ rows: [] }));
+  );
   if (pmConflicts.rows.length > 0) {
-    console.log('[DB] WARNING: Duplicate player_affiliate_link_original found. Please resolve manually:');
-    pmConflicts.rows.forEach(r => console.log('  ', r.player_affiliate_link_original, 'count:', r.count));
-  } else {
-    await query("UPDATE promoters SET player_affiliate_link_normalized = player_affiliate_link_original WHERE player_affiliate_link_original IS NOT NULL AND player_affiliate_link_normalized IS NULL").catch(() => {});
+    console.error('[DB] FATAL: Duplicate player_affiliate_link_original detected. Resolve manually then restart.');
+    pmConflicts.rows.forEach(r => console.error('  DUPLICATE:', r.player_affiliate_link_original, 'x' + r.count));
+    throw new Error('Duplicate player_affiliate_link_original — cannot auto-migrate.');
   }
+  await query("UPDATE promoters SET player_affiliate_link_normalized = player_affiliate_link_original WHERE player_affiliate_link_original IS NOT NULL AND player_affiliate_link_normalized IS NULL");
 
   const gameConflicts = await query(
     `SELECT UPPER(TRIM(game_id)) AS norm, COUNT(*) FROM players WHERE game_id IS NOT NULL AND game_id_normalized IS NULL GROUP BY UPPER(TRIM(game_id)) HAVING COUNT(*) > 1`
-  ).catch(() => ({ rows: [] }));
+  );
   if (gameConflicts.rows.length > 0) {
-    console.log('[DB] WARNING: Duplicate game_id found after normalization. Please resolve manually:');
-    gameConflicts.rows.forEach(r => console.log('  ', r.norm, 'count:', r.count));
-  } else {
-    await query("UPDATE players SET game_id_normalized = UPPER(TRIM(game_id)) WHERE game_id IS NOT NULL AND game_id_normalized IS NULL").catch(() => {});
+    console.error('[DB] FATAL: Duplicate game_id detected after normalization. Resolve manually then restart.');
+    gameConflicts.rows.forEach(r => console.error('  DUPLICATE:', r.norm, 'x' + r.count));
+    throw new Error('Duplicate game_id — cannot auto-migrate.');
   }
+  await query("UPDATE players SET game_id_normalized = UPPER(TRIM(game_id)) WHERE game_id IS NOT NULL AND game_id_normalized IS NULL");
 
   // Generate missing player_referral_tokens
   const crypto = require('crypto');
   const missing = await query("SELECT id FROM promoters WHERE player_referral_token IS NULL");
   for (const r of missing.rows) {
     const token = crypto.randomBytes(16).toString('hex');
-    await query("UPDATE promoters SET player_referral_token = $1 WHERE id = $2", [token, r.id]).catch(() => {});
+    await query("UPDATE promoters SET player_referral_token = $1 WHERE id = $2", [token, r.id]);
   }
 
-  // Ensure indexes
-  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_link_norm ON agents(agent_link_normalized)").catch(() => {});
-  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_link_norm ON promoters(player_affiliate_link_normalized)").catch(() => {});
-  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_ref_token ON promoters(player_referral_token)").catch(() => {});
-  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_players_game_id_norm ON players(game_id_normalized)").catch(() => {});
+  // Ensure indexes (IF NOT EXISTS = idempotent, real errors will throw)
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_link_norm ON agents(agent_link_normalized)");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_link_norm ON promoters(player_affiliate_link_normalized)");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_ref_token ON promoters(player_referral_token)");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_players_game_id_norm ON players(game_id_normalized)");
 
   console.log('[DB] All tables initialized. Admins:', config.ADMIN_IDS);
 }

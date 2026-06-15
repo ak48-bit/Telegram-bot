@@ -46,6 +46,12 @@ async function handleAddAgent(ctx) {
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
   if (parts.length < 3) {
+    if (parts.length === 1) {
+      const session = require('../services/session');
+      session.set(ctx.from.id, { action: 'create_agent_code', data: {}, userRole: 'admin', cancelAudit: 'step_create_agent_cancelled' });
+      await audit.log(ctx.from.id, 'admin', 'step_create_agent_started', null, null, {});
+      return ctx.reply('Please enter Agent Code:');
+    }
     return ctx.reply('Format: <code>/add_agent A001 Leo</code>', { parse_mode: 'HTML' });
   }
   const agentCode = parts[1];

@@ -9,7 +9,12 @@ async function handleSubmit(ctx) {
   const uid = ctx.from.id;
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/submit PH90123456</code>', { parse_mode: 'HTML' });
+  if (parts.length < 2) {
+    const session = require('../services/session');
+    session.set(uid, { action: 'submit_game_id', data: {}, userRole: 'player' });
+    await audit.log(uid, 'player', 'step_submit_game_id_started', null, null, {});
+    return ctx.reply('Please enter your Game ID:');
+  }
   const raw = parts[1];
   const gameId = raw.trim().toUpperCase();
 

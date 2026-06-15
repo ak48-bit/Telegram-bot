@@ -71,7 +71,12 @@ async function handleSetPlayerLink(ctx) {
   const uid = ctx.from.id;
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/set_player_link http://domain/?r=your_code</code>', { parse_mode: 'HTML' });
+  if (parts.length < 2) {
+    const session = require('../services/session');
+    session.set(uid, { action: 'set_player_link', data: {}, userRole: 'promoter' });
+    await audit.log(uid, 'promoter', 'step_set_player_link_started', null, null, {});
+    return ctx.reply('Please send your Player Affiliate Link:');
+  }
   const raw = parts[1];
 
   const result = validateAndNormalize(raw, config.ALLOWED_DOMAINS);

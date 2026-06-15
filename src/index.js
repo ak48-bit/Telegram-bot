@@ -78,6 +78,50 @@ bot.command('share', requireRole('promoter'), handleShare);
 // Player
 bot.command('submit', requireRole('player', 'admin', 'agent', 'promoter'), handleSubmit);
 
+// Session middleware — intercept messages when user is in a step-by-step flow
+const session = require('./services/session');
+const { handleSessionMessage, handleSessionCallback } = require('./handlers/session');
+
+bot.use(async (ctx, next) => {
+  if (ctx.callbackQuery) return next(); // let callback handler deal with it
+  if (!ctx.message || !ctx.message.text) return next();
+  const uid = ctx.from?.id;
+  if (!uid) return next();
+  const s = session.get(uid);
+  if (s) {
+    return handleSessionMessage(ctx, s);
+  }
+  return next();
+});
+
+// /cancel
+bot.command('cancel', async (ctx) => {
+  const uid = ctx.from.id;
+  if (session.has(uid)) {
+    session.delete(uid);
+    return ctx.reply('Cancelled.');
+  }
+  return ctx.reply('No active session to cancel.');
+});
+
+// Callback handler for Confirm/Cancel inline buttons
+bot.on('callback_query', async (ctx) => {
+  const data = ctx.callbackQuery?.data;
+  if (!data) return;
+  if (data === 'session_confirm' || data === 'session_cancel') {
+    return handleSessionCallback(ctx);
+  }
+  // Pass through to existing callback handlers
+  if (data.startsWith('players_')) {
+    const parts = data.split('_', 3);
+    if (parts.length >= 3) {
+      const { handleListMyPlayers } = require('./handlers/agent');
+      await handleListMyPlayers({ chat: ctx.callbackQuery.message.chat, from: ctx.callbackQuery.from }, parseInt(parts[2]));
+    }
+  }
+  await ctx.answerCbQuery().catch(() => {});
+});
+
 // Error
 bot.catch((err, ctx) => {
   console.error('[TELEGRAF ERROR]', err.message);

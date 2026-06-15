@@ -65,7 +65,16 @@ async function handleAddPromoter(ctx) {
   const agent = ag.rows[0];
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
-  if (parts.length < 3) return ctx.reply('Format: <code>/add_promoter B001 Tom</code>', { parse_mode: 'HTML' });
+  if (parts.length < 3) {
+    if (parts.length === 1) {
+      const session = require('../services/session');
+      const audit = require('../services/audit');
+      session.set(uid, { action: 'create_promoter_code', data: {}, userRole: 'agent', cancelAudit: 'step_create_promoter_cancelled' });
+      await audit.log(uid, 'agent', 'step_create_promoter_started', null, null, {});
+      return ctx.reply('Please enter Promoter Code:');
+    }
+    return ctx.reply('Format: <code>/add_promoter B001 Tom</code>', { parse_mode: 'HTML' });
+  }
   const promoterCode = parts[1];
   const name = parts.slice(2).join(' ');
 
@@ -98,7 +107,12 @@ async function handleSetAgentLink(ctx) {
   const uid = ctx.from.id;
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/set_agent_link http://domain/?r=your_code</code>', { parse_mode: 'HTML' });
+  if (parts.length < 2) {
+    const session = require('../services/session');
+    session.set(uid, { action: 'set_agent_link', data: {}, userRole: 'agent' });
+    await audit.log(uid, 'agent', 'step_set_agent_link_started', null, null, {});
+    return ctx.reply('Please send your Agent Promotion Link:');
+  }
   const raw = parts[1];
 
   const result = validateAndNormalize(raw, config.ALLOWED_DOMAINS);

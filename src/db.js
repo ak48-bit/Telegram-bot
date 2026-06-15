@@ -145,10 +145,36 @@ async function initDB() {
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'").catch(() => {});
   await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT").catch(() => {});
 
-  // Migrate old data
-  await query("UPDATE agents SET agent_link_normalized = agent_link_original WHERE agent_link_original IS NOT NULL AND agent_link_normalized IS NULL").catch(() => {});
-  await query("UPDATE promoters SET player_affiliate_link_normalized = player_affiliate_link_original WHERE player_affiliate_link_original IS NOT NULL AND player_affiliate_link_normalized IS NULL").catch(() => {});
-  await query("UPDATE players SET game_id_normalized = UPPER(TRIM(game_id)) WHERE game_id IS NOT NULL AND game_id_normalized IS NULL").catch(() => {});
+  // Migrate old data — detect conflicts first
+  const agentConflicts = await query(
+    `SELECT agent_link_original, COUNT(*) FROM agents WHERE agent_link_original IS NOT NULL AND agent_link_normalized IS NULL GROUP BY agent_link_original HAVING COUNT(*) > 1`
+  ).catch(() => ({ rows: [] }));
+  if (agentConflicts.rows.length > 0) {
+    console.log('[DB] WARNING: Duplicate agent_link_original found. Please resolve manually:');
+    agentConflicts.rows.forEach(r => console.log('  ', r.agent_link_original, 'count:', r.count));
+  } else {
+    await query("UPDATE agents SET agent_link_normalized = agent_link_original WHERE agent_link_original IS NOT NULL AND agent_link_normalized IS NULL").catch(() => {});
+  }
+
+  const pmConflicts = await query(
+    `SELECT player_affiliate_link_original, COUNT(*) FROM promoters WHERE player_affiliate_link_original IS NOT NULL AND player_affiliate_link_normalized IS NULL GROUP BY player_affiliate_link_original HAVING COUNT(*) > 1`
+  ).catch(() => ({ rows: [] }));
+  if (pmConflicts.rows.length > 0) {
+    console.log('[DB] WARNING: Duplicate player_affiliate_link_original found. Please resolve manually:');
+    pmConflicts.rows.forEach(r => console.log('  ', r.player_affiliate_link_original, 'count:', r.count));
+  } else {
+    await query("UPDATE promoters SET player_affiliate_link_normalized = player_affiliate_link_original WHERE player_affiliate_link_original IS NOT NULL AND player_affiliate_link_normalized IS NULL").catch(() => {});
+  }
+
+  const gameConflicts = await query(
+    `SELECT UPPER(TRIM(game_id)) AS norm, COUNT(*) FROM players WHERE game_id IS NOT NULL AND game_id_normalized IS NULL GROUP BY UPPER(TRIM(game_id)) HAVING COUNT(*) > 1`
+  ).catch(() => ({ rows: [] }));
+  if (gameConflicts.rows.length > 0) {
+    console.log('[DB] WARNING: Duplicate game_id found after normalization. Please resolve manually:');
+    gameConflicts.rows.forEach(r => console.log('  ', r.norm, 'count:', r.count));
+  } else {
+    await query("UPDATE players SET game_id_normalized = UPPER(TRIM(game_id)) WHERE game_id IS NOT NULL AND game_id_normalized IS NULL").catch(() => {});
+  }
 
   // Generate missing player_referral_tokens
   const crypto = require('crypto');

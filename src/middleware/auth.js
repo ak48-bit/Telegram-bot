@@ -41,7 +41,9 @@ function requireRole(...roles) {
     const user = ctx.state.user;
     if (!user) return ctx.reply('Please /start first.');
     if (!roles.includes(user.role)) {
-      return ctx.reply('⛔ You do not have permission.');
+      const audit = require('../services/audit');
+      audit.log(user.telegram_id, user.role, 'no_permission', null, null, { attempted_roles: roles }).catch(() => {});
+      return ctx.reply('No permission.');
     }
     // 额外：检查 agent/promoter 的 status
     if (user.role === 'agent') {

@@ -2,7 +2,7 @@ const db = require('../db');
 const audit = require('../services/audit');
 const config = require('../config');
 
-const GAME_ID_REGEX = new RegExp(process.env.GAME_ID_REGEX || '^PH90[A-Za-z0-9]{4,12}$');
+const GAME_ID_REGEX = new RegExp(config.GAME_ID_REGEX);
 
 // /submit
 async function handleSubmit(ctx) {

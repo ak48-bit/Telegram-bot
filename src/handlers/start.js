@@ -1,9 +1,10 @@
 const db = require('../db');
 const { useInviteToken } = require('../services/token');
 const audit = require('../services/audit');
+const config = require('../config');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
-const ENABLE_LEGACY = (process.env.ENABLE_LEGACY_PLAYER_LINK || 'false') === 'true';
+const ENABLE_LEGACY = config.ENABLE_LEGACY_PLAYER_LINK;
 
 async function handleStart(ctx) {
   const payload = ctx.startPayload || '';

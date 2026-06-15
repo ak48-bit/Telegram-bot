@@ -54,8 +54,8 @@ async function handleAgent(ctx) {
     `Players：${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
     `<b>Promoter List：</b>` + (pmList || '\nNo Promoters') + '\n' +
     `<b>Commands:</b>\n` +
-    `/agent_link — View Affiliate Link\n` +
-    `/set_agent_promo — Set Affiliate Link\n` +
+    `/my_link — View Affiliate Link\n` +
+    `/set_promo — Set Affiliate Link\n` +
     `/add_promoter B001 Name — Create Promoter\n` +
     `/list_my_promoters — View Promoters\n` +
     `/relink_pm B001 — Regenerate Promoter Binding Link\n` +
@@ -247,7 +247,7 @@ async function handleAgentMyLink(ctx) {
   if (a.promo_url) {
     msg += `Agent Affiliate Link：\n${a.promo_url}\n`;
   } else {
-    msg += `Agent Affiliate Link：<i>Not set — /set_agent_promo</i>\n`;
+    msg += `Agent Affiliate Link：<i>Not set — /set_promo</i>\n`;
   }
   msg += `\nShare this link with promoters or players.`;
   return ctx.reply(msg, { parse_mode: 'HTML' });
@@ -258,7 +258,7 @@ async function handleAgentSetPromo(ctx) {
   const uid = ctx.from.id;
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/set_agent_promo http://domain/?r=your_code</code>', { parse_mode: 'HTML' });
+  if (parts.length < 2) return ctx.reply('Format: <code>/set_promo http://domain/?r=your_code</code>', { parse_mode: 'HTML' });
   const url = parts[1];
   if (!url.startsWith('http')) return ctx.reply('URL must start with http:// or https://.');
   await db.query('UPDATE agents SET promo_url = $1 WHERE telegram_id = $2', [url, uid]);

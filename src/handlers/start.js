@@ -69,7 +69,7 @@ async function handleBindToken(ctx, payload, uid) {
         `👥 <b>Agent Bound Successfully!</b>\n\n` +
         `Agent Code：<code>${code}</code>\n` +
         (promoUrl ? `Agent Affiliate Link：\n${promoUrl}\n\n` : '\n') +
-        `Available Commands：/agent | /add_promoter | /list_my_promoters | /list_my_players | /agent_link | /set_agent_promo`,
+        `Available Commands：/agent | /add_promoter | /list_my_promoters | /list_my_players | /my_link | /set_promo`,
         { parse_mode: 'HTML' }
       );
     }

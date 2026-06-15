@@ -52,15 +52,23 @@ bot.command('list_my_promoters', requireRole('agent'), handleListMyPromoters);
 bot.command('list_my_players', requireRole('agent'), handleListMyPlayers);
 bot.command('export_my_players', requireRole('agent'), handleExportMyPlayers);
 bot.command('relink_pm', requireRole('agent'), handleRelinkPromoter);
-bot.command('agent_link', requireRole('agent'), handleAgentMyLink);
-bot.command('set_agent_promo', requireRole('agent'), handleAgentSetPromo);
+
+// ── Agent + Promoter 共享命令 ─────────────────────────────────────
+// /my_link — 根据角色自动路由
+bot.command('my_link', requireRole('agent', 'promoter'), async (ctx) => {
+  if (ctx.state.user.role === 'agent') return handleAgentMyLink(ctx);
+  return handleMyLink(ctx);
+});
+// /set_promo — 根据角色自动路由
+bot.command('set_promo', requireRole('agent', 'promoter'), async (ctx) => {
+  if (ctx.state.user.role === 'agent') return handleAgentSetPromo(ctx);
+  return handleSetPromo(ctx);
+});
 
 // ── Promoter 命令 ────────────────────────────────────────────────
 bot.command('promoter', requireRole('promoter'), handlePromoter);
-bot.command('my_link', requireRole('promoter'), handleMyLink);
 bot.command('my_players', requireRole('promoter'), handleMyPlayers);
 bot.command('my_today', requireRole('promoter'), handleMyToday);
-bot.command('set_promo', requireRole('promoter'), handleSetPromo);
 bot.command('share', requireRole('promoter'), handleShare);
 
 // ── Player 命令 ──────────────────────────────────────────────────

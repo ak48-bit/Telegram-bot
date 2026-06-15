@@ -26,7 +26,7 @@ async function handleBindToken(ctx, payload, uid) {
   try {
     const result = await useInviteToken(token, uid);
     if (!result) {
-      return ctx.reply('This binding link is invalid or expired.\n\nPossible reasons:\n• Link already used\n• Link expired (48h)\n• Link revoked\n\nContact your upline for a new link.');
+      return ctx.reply('This binding link is invalid or expired.\n\nPossible reasons:\n• Link already used\n• Link expired\n• Link revoked\n\nContact your upline for a new link.');
     }
     const { type, code } = result;
     if (type === 'agent_bind') {

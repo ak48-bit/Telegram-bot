@@ -97,7 +97,7 @@ async function handleAddPromoter(ctx) {
     `Promoter Code：<code>${promoterCode}</code>\n` +
     `Name：${name}\n\n` +
     `Promoter Bot Link：\n${link}\n\n` +
-    `⚠️ One-time use, 48h valid. After binding, use /set_player_link.`,
+    `⚠️ One-time use, no expiry. After binding, use /set_player_link.`,
     { parse_mode: 'HTML' }
   );
 }
@@ -237,7 +237,7 @@ async function handleRelinkPromoter(ctx) {
   const token = await createInviteToken('promoter_bind', code, uid);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
   await audit.log(uid, 'agent', 'relink_promoter', 'promoter', code);
-  return ctx.reply(`🔗 <b>Promoter Binding Link (New)</b>\n\nCode：<code>${code}</code>\nName：${pm.rows[0].name}\n\n<code>${link}</code>\n\n⚠️ Old link invalidated. One-time use, 48h valid.`, { parse_mode: 'HTML' });
+  return ctx.reply(`🔗 <b>Promoter Binding Link (New)</b>\n\nCode：<code>${code}</code>\nName：${pm.rows[0].name}\n\n<code>${link}</code>\n\n⚠️ Old link invalidated. One-time use, no expiry.`, { parse_mode: 'HTML' });
 }
 
 // /set_promo — legacy redirect

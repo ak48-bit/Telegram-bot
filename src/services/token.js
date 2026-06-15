@@ -10,7 +10,8 @@ const config = require('../config');
  */
 async function createInviteToken(type, code, createdBy) {
   const token = crypto.randomBytes(24).toString('hex');
-  const expiresAt = new Date(Date.now() + config.TOKEN_EXPIRY_HOURS * 3600 * 1000);
+  // 永不过期（10年后），仅一次性使用限制
+  const expiresAt = new Date(Date.now() + 10 * 365 * 24 * 3600 * 1000);
 
   await db.query(
     `INSERT INTO invite_tokens (token, type, code, created_by, expires_at)

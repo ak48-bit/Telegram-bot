@@ -59,11 +59,17 @@ async function handleBindToken(ctx, payload, uid) {
       );
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
 
+      // 查询 Agent Affiliate Link
+      const agInfo = await db.query(
+        `SELECT promo_url FROM agents WHERE agent_code = $1`, [code]
+      );
+      const promoUrl = agInfo.rows[0]?.promo_url || '';
+
       return ctx.reply(
-        `👥 <b>Agent Clicks Binding Link</b>\n\n` +
-        `🎉 Agent Bound Successfully!\n` +
-        `Agent Code：<code>${code}</code>\n\n` +
-        `Available Commands：/agent | /add_promoter | /list_my_promoters | /list_my_players`,
+        `👥 <b>Agent Bound Successfully!</b>\n\n` +
+        `Agent Code：<code>${code}</code>\n` +
+        (promoUrl ? `Agent Affiliate Link：\n${promoUrl}\n\n` : '\n') +
+        `Available Commands：/agent | /add_promoter | /list_my_promoters | /list_my_players | /agent_link | /set_agent_promo`,
         { parse_mode: 'HTML' }
       );
     }

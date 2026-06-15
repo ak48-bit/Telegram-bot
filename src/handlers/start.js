@@ -1,200 +1,115 @@
 const db = require('../db');
 const { useInviteToken } = require('../services/token');
 const audit = require('../services/audit');
-const config = require('../config');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
+const ENABLE_LEGACY = (process.env.ENABLE_LEGACY_PLAYER_LINK || 'false') === 'true';
 
 async function handleStart(ctx) {
   const payload = ctx.startPayload || '';
   const uid = ctx.from.id;
   const user = ctx.state.user;
 
-  // ── 1. 一次性绑定 Token（Agent / Promoter） ──
   if (payload.startsWith('bind_agent_') || payload.startsWith('bind_promoter_')) {
     return handleBindToken(ctx, payload, uid);
   }
-
-  // ── 2. 玩家通过推广链接进入 (p_XXXX) ──
   if (payload.startsWith('p_')) {
     return handlePlayerEntry(ctx, payload, uid);
   }
-
-  // ── 3. 普通 /start ──
   return handlePlainStart(ctx, user);
 }
 
-// ═══════════════ Token 绑定 ═══════════════
-
+// ═══ Token Binding ═══
 async function handleBindToken(ctx, payload, uid) {
   const token = payload.replace(/^(bind_agent_|bind_promoter_)/, '');
-
   try {
     const result = await useInviteToken(token, uid);
-
     if (!result) {
-      return ctx.reply(
-        '⛔ This binding link is invalid or expired.\n\n' +
-        'Possible reasons:\n' +
-        '• Link already used\n' +
-        '• Link expired (valid 48 hours)\n' +
-        '• Link has been revoked\n\n' +
-        'Please contact your upline for a new binding link.'
-      );
+      return ctx.reply('This binding link is invalid or expired.\n\nPossible reasons:\n• Link already used\n• Link expired (48h)\n• Link revoked\n\nContact your upline for a new link.');
     }
-
     const { type, code } = result;
-
     if (type === 'agent_bind') {
-      // 绑定 Agent 身份
-      await db.query(
-        `UPDATE users SET role = 'agent', status = 'active', updated_at = NOW()
-         WHERE telegram_id = $1`,
-        [uid]
-      );
-      await db.query(
-        `UPDATE agents SET telegram_id = $1, status = 'active', updated_at = NOW()
-         WHERE agent_code = $2`,
-        [uid, code]
-      );
+      await db.query(`UPDATE users SET role = 'agent', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
+      await db.query(`UPDATE agents SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE agent_code = $2`, [uid, code]);
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
-
       return ctx.reply(
-        `👥 <b>Agent Bound Successfully!</b>\n\n` +
-        `Agent Code：<code>${code}</code>\n\n` +
-        `⚠️ Use /set_promo to submit your Affiliate Link.\n\n` +
-        `Available Commands：/agent | /add_promoter | /list_my_promoters | /list_my_players | /my_link | /set_promo`,
+        `👥 <b>Agent Bound Successfully!</b>\n\nAgent Code：<code>${code}</code>\n\n⚠️ Use /set_agent_link to submit your Agent Link.\n\nCommands：/agent | /add_promoter | /list_my_promoters | /list_my_players | /my_agent_link | /set_agent_link | /relink_pm`,
         { parse_mode: 'HTML' }
       );
     }
-
     if (type === 'promoter_bind') {
-      // 绑定 Promoter 身份
       const pm = await db.query(
-        `SELECT pm.id, pm.agent_id, a.agent_code, a.name AS agent_name
-         FROM promoters pm JOIN agents a ON pm.agent_id = a.id
-         WHERE pm.promoter_code = $1`, [code]
+        `SELECT pm.id, pm.agent_id, a.agent_code FROM promoters pm JOIN agents a ON pm.agent_id = a.id WHERE pm.promoter_code = $1`, [code]
       );
-      if (pm.rows.length === 0) {
-        return ctx.reply('⛔ Promoter record not found.');
-      }
-      await db.query(
-        `UPDATE users SET role = 'promoter', status = 'active', updated_at = NOW()
-         WHERE telegram_id = $1`,
-        [uid]
-      );
-      await db.query(
-        `UPDATE promoters SET telegram_id = $1, status = 'active', updated_at = NOW()
-         WHERE promoter_code = $2`,
-        [uid, code]
-      );
+      if (pm.rows.length === 0) return ctx.reply('Promoter record not found.');
+      await db.query(`UPDATE users SET role = 'promoter', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
+      await db.query(`UPDATE promoters SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE promoter_code = $2`, [uid, code]);
       await audit.log(uid, 'promoter', 'promoter_bind', 'promoter', code);
-
-      const p = pm.rows[0];
-
       return ctx.reply(
-        `📢 <b>Promoter Clicks Binding Link</b>\n\n` +
-        `🎉 Promoter Bound Successfully!\n` +
-        `Promoter Code：<code>${code}</code>\n` +
-        `Assigned Agent：${p.agent_code}\n\n` +
-        `Available Commands：/promoter | /set_promo | /my_link | /my_players | /share`,
+        `📢 <b>Promoter Bound Successfully!</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${pm.rows[0].agent_code}\n\n⚠️ Use /set_player_link to submit your Player Link.\n\nCommands：/promoter | /my_link | /set_player_link | /my_players | /share`,
         { parse_mode: 'HTML' }
       );
     }
   } catch (e) {
     console.error('[BindToken]', e);
-    return ctx.reply('System error, please contact admin.');
+    return ctx.reply('System error, contact admin.');
   }
 }
 
-// ═══════════════ 玩家通过推广链接进入 ═══════════════
-
+// ═══ Player Entry via Random Token ═══
 async function handlePlayerEntry(ctx, payload, uid) {
-  const promoterCode = payload.replace(/^p_/, '');
-
-  // 查找 Promoter
+  const rawToken = payload.replace(/^p_/, '');
+  // Check if legacy code (old format p_Code)
+  if (ENABLE_LEGACY) {
+    const legacyPm = await db.query('SELECT * FROM promoters WHERE promoter_code = $1', [rawToken]);
+    if (legacyPm.rows.length > 0) {
+      return handlePlayerBind(ctx, uid, legacyPm.rows[0], rawToken);
+    }
+  }
+  // New random token lookup
   const pm = await db.query(
-    `SELECT pm.*, a.agent_code, a.name AS agent_name
-     FROM promoters pm
-     JOIN agents a ON pm.agent_id = a.id
-     WHERE pm.promoter_code = $1`,
-    [promoterCode]
+    `SELECT pm.*, a.agent_code FROM promoters pm JOIN agents a ON pm.agent_id = a.id WHERE pm.player_referral_token = $1`, [rawToken]
   );
+  if (pm.rows.length === 0) return ctx.reply('Invalid referral link.');
+  return handlePlayerBind(ctx, uid, pm.rows[0], rawToken);
+}
 
-  if (pm.rows.length === 0) {
-    return ctx.reply('⛔ Invalid referral link.');
-  }
-
-  const promoter = pm.rows[0];
-
-  // 检查 Promoter 是否被封禁
-  if (promoter.status === 'blocked') {
-    return ctx.reply('🚫 This referral link has been suspended.');
-  }
-
-  // 检查 Agent 是否被封禁
+async function handlePlayerBind(ctx, uid, promoter, payload) {
+  if (promoter.status === 'blocked') return ctx.reply('This referral link has been suspended.');
   const ag = await db.query('SELECT status FROM agents WHERE id = $1', [promoter.agent_id]);
-  if (ag.rows.length > 0 && ag.rows[0].status === 'blocked') {
-    return ctx.reply('🚫 This referral link has been suspended.');
-  }
+  if (ag.rows.length > 0 && ag.rows[0].status === 'blocked') return ctx.reply('This referral link has been suspended.');
 
-  // 检查玩家是否已绑定过来源
-  const existing = await db.query(
-    `SELECT * FROM players WHERE telegram_id = $1`, [uid]
-  );
-
+  const existing = await db.query('SELECT * FROM players WHERE telegram_id = $1', [uid]);
   if (existing.rows.length > 0) {
-    const p = existing.rows[0];
-    // 已经绑定过 — 不允许自动修改
-    const oldPm = await db.query(
-      `SELECT promoter_code FROM promoters WHERE id = $1`, [p.promoter_id]
-    );
+    const oldPm = await db.query('SELECT promoter_code FROM promoters WHERE id = $1', [existing.rows[0].promoter_id]);
+    await audit.log(uid, 'player', 'player_relink_blocked', 'promoter', oldPm.rows[0]?.promoter_code, { attempted: promoter.promoter_code });
     return ctx.reply(
-      `⚠️ You already have a referral source.\n\n` +
-      `Current Promoter: <code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\n` +
-      `To change, please contact customer service.`
+      `⚠️ You already have a referral source.\n\nCurrent Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\nTo change, contact customer service.`
     );
   }
 
-  // 第一次绑定 — 锁定来源
   await db.query(
-    `INSERT INTO players (telegram_id, username, first_name, last_name, promoter_id, agent_id, first_start_payload)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    `INSERT INTO players (telegram_id, username, first_name, last_name, promoter_id, agent_id, first_start_payload) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     [uid, ctx.from.username, ctx.from.first_name, ctx.from.last_name, promoter.id, promoter.agent_id, payload]
   );
-
-  // 更新 users 表 role 为 player
-  await db.query(
-    `UPDATE users SET role = 'player', updated_at = NOW() WHERE telegram_id = $1`, [uid]
-  );
-
-  await audit.log(uid, 'player', 'player_linked', 'promoter', promoterCode, {
-    promoter_id: promoter.id,
-    agent_id: promoter.agent_id,
-  });
+  await db.query(`UPDATE users SET role = 'player', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
+  await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });
 
   return ctx.reply(
-    `🎰 <b>Welcome！</b>\n` +
-    `Referral Source：<code>${promoterCode}</code>\n\n` +
-    `Available Commands：/submit PH90xxxx | /my`,
+    `🎰 <b>Welcome!</b>\nReferral Source：<code>${promoter.promoter_code}</code>\n\nAvailable Commands：/submit PH90xxxx | /my`,
     { parse_mode: 'HTML' }
   );
 }
 
-// ═══════════════ 普通 /start ═══════════════
-
+// ═══ Plain /start ═══
 async function handlePlainStart(ctx, user) {
-  const roleTexts = {
+  const texts = {
     admin: `👑 <b>Admin Panel</b>\n\n/admin — Admin Menu`,
-    agent: `🏢 <b>Agent Panel</b>\n\n/agent — View Menu`,
+    agent: `👥 <b>Agent Panel</b>\n\n/agent — View Menu`,
     promoter: `📢 <b>Promoter Panel</b>\n\n/promoter — View Menu`,
-    player: `🎮 <b>Player Panel</b>\n\n/submit 游戏ID — Submit Game ID\n/my — View My Info`,
+    player: `🎮 <b>Player Panel</b>\n\n/submit GameID — Submit Game ID\n/my — View Info`,
   };
-
-  const text = roleTexts[user.role] ||
-    `🤖 <b>Welcome to Referral Bot</b>\n\nIf you have a referral link, please use it to enter.`;
-
-  return ctx.reply(text, { parse_mode: 'HTML' });
+  return ctx.reply(texts[user.role] || `🤖 <b>Welcome!</b>\n\nIf you have a referral link, please use it to enter.`);
 }
 
 module.exports = { handleStart };

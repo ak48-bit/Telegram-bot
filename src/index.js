@@ -9,29 +9,29 @@ const {
   handleListPlayers, handleBlockAgent, handleBlockPromoter,
   handleChangePlayerOwner, handleExportPlayers,
   handleListPending, handleApproveGame, handleRejectGame,
+  handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
 } = require('./handlers/admin');
 const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
   handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
-  handleAgentMyLink, handleAgentSetPromo,
+  handleSetAgentLink, handleMyAgentLink, handleAgentSetPromoCompat,
 } = require('./handlers/agent');
 const {
-  handlePromoter, handleMyLink, handleMyPlayers, handleMyToday, handleSetPromo, handleShare,
+  handlePromoter, handleMyLink, handleMyPlayers, handleMyToday,
+  handleSetPlayerLink, handleSetPromoCompat, handleShare,
 } = require('./handlers/promoter');
 const { handleSubmit, handlePlayerMy } = require('./handlers/player');
 
-// ── 初始化 Bot ──────────────────────────────────────────────────
 const bot = new Telegraf(config.BOT_TOKEN);
 
-// ── 全局中间件 ──────────────────────────────────────────────────
 bot.use(ensureUser);
 bot.use(checkBlocked);
 
-// ── 通用命令 ─────────────────────────────────────────────────────
+// Generic
 bot.start(handleStart);
 bot.command('my', requireRole('player', 'admin', 'agent', 'promoter'), handlePlayerMy);
 
-// ── Admin 命令 ───────────────────────────────────────────────────
+// Admin
 bot.command('admin', requireRole('admin'), handleAdmin);
 bot.command('add_agent', requireRole('admin'), handleAddAgent);
 bot.command('list_agents', requireRole('admin'), handleListAgents);
@@ -44,43 +44,47 @@ bot.command('export_players', requireRole('admin'), handleExportPlayers);
 bot.command('list_pending', requireRole('admin'), handleListPending);
 bot.command('approve_game', requireRole('admin'), handleApproveGame);
 bot.command('reject_game', requireRole('admin'), handleRejectGame);
+bot.command('relink_agent', requireRole('admin'), handleRelinkAgent);
+bot.command('reset_agent_link', requireRole('admin'), handleResetAgentLink);
+bot.command('reset_player_link', requireRole('admin'), handleResetPlayerLink);
 
-// ── Agent 命令 ───────────────────────────────────────────────────
+// Agent
 bot.command('agent', requireRole('agent'), handleAgent);
 bot.command('add_promoter', requireRole('agent'), handleAddPromoter);
 bot.command('list_my_promoters', requireRole('agent'), handleListMyPromoters);
 bot.command('list_my_players', requireRole('agent'), handleListMyPlayers);
 bot.command('export_my_players', requireRole('agent'), handleExportMyPlayers);
 bot.command('relink_pm', requireRole('agent'), handleRelinkPromoter);
+bot.command('set_agent_link', requireRole('agent'), handleSetAgentLink);
+bot.command('my_agent_link', requireRole('agent'), handleMyAgentLink);
 
-// ── Agent + Promoter 共享命令 ─────────────────────────────────────
-// /my_link — 根据角色自动路由
+// Agent + Promoter shared legacy
+bot.command('set_promo', requireRole('agent', 'promoter'), async (ctx) => {
+  if (ctx.state.user.role === 'agent') return handleAgentSetPromoCompat(ctx);
+  return handleSetPromoCompat(ctx);
+});
 bot.command('my_link', requireRole('agent', 'promoter'), async (ctx) => {
-  if (ctx.state.user.role === 'agent') return handleAgentMyLink(ctx);
+  if (ctx.state.user.role === 'agent') return handleMyAgentLink(ctx);
   return handleMyLink(ctx);
 });
-// /set_promo — 根据角色自动路由
-bot.command('set_promo', requireRole('agent', 'promoter'), async (ctx) => {
-  if (ctx.state.user.role === 'agent') return handleAgentSetPromo(ctx);
-  return handleSetPromo(ctx);
-});
 
-// ── Promoter 命令 ────────────────────────────────────────────────
+// Promoter
 bot.command('promoter', requireRole('promoter'), handlePromoter);
 bot.command('my_players', requireRole('promoter'), handleMyPlayers);
 bot.command('my_today', requireRole('promoter'), handleMyToday);
+bot.command('set_player_link', requireRole('promoter'), handleSetPlayerLink);
 bot.command('share', requireRole('promoter'), handleShare);
 
-// ── Player 命令 ──────────────────────────────────────────────────
+// Player
 bot.command('submit', requireRole('player', 'admin', 'agent', 'promoter'), handleSubmit);
 
-// ── 全局错误处理 ────────────────────────────────────────────────
+// Error
 bot.catch((err, ctx) => {
   console.error('[TELEGRAF ERROR]', err.message);
   ctx.reply('System error, please try again later.').catch(() => {});
 });
 
-// ── 启动 ─────────────────────────────────────────────────────────
+// Startup
 async function start() {
   console.log('[INIT] Connecting to database...');
   await initDB();
@@ -93,31 +97,21 @@ async function start() {
     });
     console.log(`[WEBHOOK] Set to ${webhookUrl}`);
 
-    // 中间件过滤 webhook (Express-like for Render)
     const express = require('express');
     const app = express();
     app.use(express.json());
-
-    // Webhook 验证
     app.post('/webhook', (req, res) => {
       if (req.headers['x-telegram-bot-api-secret-token'] !== config.SECRET_TOKEN) {
         return res.status(403).json({ ok: false, error: 'unauthorized' });
       }
-      // 立即响应 Telegram，避免超时重试
       res.sendStatus(200);
-      // 异步处理 update
       setImmediate(() => {
         bot.handleUpdate(req.body).catch(err => console.error('[WEBHOOK ASYNC]', err.message));
       });
     });
-
     app.get('/', (_, res) => res.send('Bot is running 24/7 🚀'));
-
-    app.listen(config.PORT, () => {
-      console.log(`[START] Webhook server on port ${config.PORT}`);
-    });
+    app.listen(config.PORT, () => console.log(`[START] Webhook server on port ${config.PORT}`));
   } else {
-    // 本地开发：polling 模式
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
     console.log('[START] Polling mode...');
     bot.launch();
@@ -129,6 +123,5 @@ start().catch(err => {
   process.exit(1);
 });
 
-// 优雅退出
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));

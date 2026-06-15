@@ -297,9 +297,48 @@ async function handleRejectGame(ctx) {
   return ctx.reply(`❌ Rejected`, { parse_mode: 'HTML' });
 }
 
+// /relink_agent AgentCode
+async function handleRelinkAgent(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: <code>/relink_agent AgentCode</code>', { parse_mode: 'HTML' });
+  const code = parts[1];
+  const ag = await db.query('SELECT * FROM agents WHERE agent_code = $1', [code]);
+  if (ag.rows.length === 0) return ctx.reply(`Agent <code>${code}</code> not found.`, { parse_mode: 'HTML' });
+  await db.query(`UPDATE invite_tokens SET is_used = TRUE WHERE code = $1 AND type = 'agent_bind' AND is_used = FALSE`, [code]);
+  const token = await createInviteToken('agent_bind', code, ctx.from.id);
+  const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
+  await audit.log(ctx.from.id, 'admin', 'relink_agent', 'agent', code);
+  return ctx.reply(`🔗 <b>Agent Binding Link (New)</b>\n\nCode：<code>${code}</code>\n\n<code>${link}</code>\n\n⚠️ Old link invalidated. One-time use, 48h.`, { parse_mode: 'HTML' });
+}
+
+// /reset_agent_link AgentCode
+async function handleResetAgentLink(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: <code>/reset_agent_link AgentCode</code>', { parse_mode: 'HTML' });
+  const code = parts[1];
+  const ag = await db.query('SELECT * FROM agents WHERE agent_code = $1', [code]);
+  if (ag.rows.length === 0) return ctx.reply(`Agent <code>${code}</code> not found.`, { parse_mode: 'HTML' });
+  await db.query(`UPDATE agents SET agent_link_original = NULL, agent_link_normalized = NULL, link_status = 'NOT_SUBMITTED', updated_at = NOW() WHERE agent_code = $1`, [code]);
+  await audit.log(ctx.from.id, 'admin', 'reset_agent_link', 'agent', code);
+  return ctx.reply(`✅ Agent <code>${code}</code> link reset to NOT_SUBMITTED. Agent can now re-submit with /set_agent_link.`, { parse_mode: 'HTML' });
+}
+
+// /reset_player_link PromoterCode
+async function handleResetPlayerLink(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: <code>/reset_player_link PromoterCode</code>', { parse_mode: 'HTML' });
+  const code = parts[1];
+  const pm = await db.query('SELECT * FROM promoters WHERE promoter_code = $1', [code]);
+  if (pm.rows.length === 0) return ctx.reply(`Promoter <code>${code}</code> not found.`, { parse_mode: 'HTML' });
+  await db.query(`UPDATE promoters SET player_affiliate_link_original = NULL, player_affiliate_link_normalized = NULL, link_status = 'NOT_SUBMITTED', updated_at = NOW() WHERE promoter_code = $1`, [code]);
+  await audit.log(ctx.from.id, 'admin', 'reset_player_link', 'promoter', code);
+  return ctx.reply(`✅ Promoter <code>${code}</code> link reset to NOT_SUBMITTED. Promoter can re-submit with /set_player_link.`, { parse_mode: 'HTML' });
+}
+
 module.exports = {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
   handleListPlayers, handleBlockAgent, handleBlockPromoter,
   handleChangePlayerOwner, handleExportPlayers,
   handleListPending, handleApproveGame, handleRejectGame,
+  handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
 };

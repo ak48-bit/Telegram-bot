@@ -8,7 +8,6 @@ const pool = new Pool({
   connectionTimeoutMillis: 10000,
 });
 
-// 测试连接
 pool.on('error', (err) => {
   console.error('[DB] Unexpected pool error:', err.message);
 });
@@ -23,19 +22,16 @@ async function query(text, params) {
 }
 
 async function initDB() {
-  // 检测 + 备份旧 Python Bot 的 users 表（如果存在旧格式）
   const oldCheck = await query(
     `SELECT column_name FROM information_schema.columns
      WHERE table_name = 'users' AND column_name = 'ref_code'`
   ).catch(() => ({ rows: [] }));
-
   if (oldCheck.rows.length > 0) {
-    console.log('[DB] Old Python bot users table detected — renaming to users_old');
+    console.log('[DB] Old Python bot users table — renaming to users_old');
     await query('ALTER TABLE IF EXISTS users RENAME TO users_old').catch(() => {});
   }
 
   const sql = `
-    -- 角色表
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
       telegram_id BIGINT UNIQUE NOT NULL,
@@ -48,14 +44,13 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- Agent 详情
     CREATE TABLE IF NOT EXISTS agents (
       id SERIAL PRIMARY KEY,
       agent_code TEXT UNIQUE NOT NULL,
       telegram_id BIGINT UNIQUE REFERENCES users(telegram_id),
       name TEXT NOT NULL,
-      promo_url TEXT,
-      player_affiliate_link TEXT UNIQUE,
+      agent_link_original TEXT,
+      agent_link_normalized TEXT,
       link_status TEXT DEFAULT 'NOT_SUBMITTED' CHECK (link_status IN ('NOT_SUBMITTED','BOUND')),
       status TEXT DEFAULT 'active' CHECK (status IN ('active','blocked','pending')),
       created_by_admin_id BIGINT REFERENCES users(telegram_id),
@@ -63,15 +58,15 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- Promoter 详情
     CREATE TABLE IF NOT EXISTS promoters (
       id SERIAL PRIMARY KEY,
       promoter_code TEXT UNIQUE NOT NULL,
       telegram_id BIGINT UNIQUE REFERENCES users(telegram_id),
       agent_id INTEGER REFERENCES agents(id),
       name TEXT NOT NULL,
-      promo_url TEXT,
-      player_affiliate_link TEXT UNIQUE,
+      player_affiliate_link_original TEXT,
+      player_affiliate_link_normalized TEXT,
+      player_referral_token TEXT UNIQUE,
       link_status TEXT DEFAULT 'NOT_SUBMITTED' CHECK (link_status IN ('NOT_SUBMITTED','BOUND')),
       status TEXT DEFAULT 'active' CHECK (status IN ('active','blocked','pending')),
       created_by_agent_id BIGINT REFERENCES users(telegram_id),
@@ -79,7 +74,6 @@ async function initDB() {
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- 玩家详情
     CREATE TABLE IF NOT EXISTS players (
       id SERIAL PRIMARY KEY,
       telegram_id BIGINT UNIQUE NOT NULL REFERENCES users(telegram_id),
@@ -89,13 +83,13 @@ async function initDB() {
       promoter_id INTEGER REFERENCES promoters(id),
       agent_id INTEGER REFERENCES agents(id),
       game_id TEXT,
-      game_id_status TEXT DEFAULT 'pending' CHECK (game_id_status IN ('pending','approved','rejected')),
+      game_id_normalized TEXT,
+      game_id_status TEXT DEFAULT 'approved' CHECK (game_id_status IN ('pending','approved','rejected')),
       first_start_payload TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- 一次性绑定 Token
     CREATE TABLE IF NOT EXISTS invite_tokens (
       id SERIAL PRIMARY KEY,
       token TEXT UNIQUE NOT NULL,
@@ -109,7 +103,6 @@ async function initDB() {
       used_at TIMESTAMP
     );
 
-    -- 审计日志
     CREATE TABLE IF NOT EXISTS audit_logs (
       id SERIAL PRIMARY KEY,
       actor_telegram_id BIGINT NOT NULL,
@@ -121,11 +114,12 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
-    -- 索引
-    CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
-    CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
-    CREATE INDEX IF NOT EXISTS idx_agents_code ON agents(agent_code);
-    CREATE INDEX IF NOT EXISTS idx_promoters_code ON promoters(promoter_code);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_code ON agents(agent_code);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_code ON promoters(promoter_code);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_link_norm ON agents(agent_link_normalized);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_link_norm ON promoters(player_affiliate_link_normalized);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_ref_token ON promoters(player_referral_token);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_players_game_id_norm ON players(game_id_normalized);
     CREATE INDEX IF NOT EXISTS idx_promoters_agent ON promoters(agent_id);
     CREATE INDEX IF NOT EXISTS idx_players_promoter ON players(promoter_id);
     CREATE INDEX IF NOT EXISTS idx_players_agent ON players(agent_id);
@@ -134,26 +128,42 @@ async function initDB() {
     CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_telegram_id);
     CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
 
-    -- 创建 admin 用户（如果不存在）
     ${config.ADMIN_IDS.map(id => `
     INSERT INTO users (telegram_id, role, status) VALUES (${id}, 'admin', 'active')
     ON CONFLICT (telegram_id) DO UPDATE SET role = 'admin', status = 'active';
     `).join('')}
   `;
   await query(sql);
-  // 兼容旧表迁移
-  await query('ALTER TABLE promoters ADD COLUMN IF NOT EXISTS promo_url TEXT').catch(() => {});
-  await query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS promo_url TEXT').catch(() => {});
-  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS player_affiliate_link TEXT").catch(() => {});
+
+  // Migration: add new columns if upgrading from old schema
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_original TEXT").catch(() => {});
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_normalized TEXT").catch(() => {});
   await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'").catch(() => {});
-  await query("UPDATE agents SET player_affiliate_link = promo_url, link_status = 'BOUND' WHERE promo_url IS NOT NULL AND player_affiliate_link IS NULL AND promo_url != ''").catch(() => {});
-  await query("ALTER TABLE agents ADD CONSTRAINT IF NOT EXISTS unique_agent_player_link UNIQUE (player_affiliate_link)").catch(() => {});
-  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link TEXT").catch(() => {});
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_original TEXT").catch(() => {});
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_normalized TEXT").catch(() => {});
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_referral_token TEXT").catch(() => {});
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'").catch(() => {});
-  // 迁移旧数据：如果 promo_url 有值但 player_affiliate_link 为空，迁移过去
-  await query("UPDATE promoters SET player_affiliate_link = promo_url, link_status = 'BOUND' WHERE promo_url IS NOT NULL AND player_affiliate_link IS NULL AND promo_url != ''").catch(() => {});
-  // 给 player_affiliate_link 加唯一约束（如果还没加）
-  await query("ALTER TABLE promoters ADD CONSTRAINT IF NOT EXISTS unique_player_affiliate_link UNIQUE (player_affiliate_link)").catch(() => {});
+  await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT").catch(() => {});
+
+  // Migrate old data
+  await query("UPDATE agents SET agent_link_normalized = agent_link_original WHERE agent_link_original IS NOT NULL AND agent_link_normalized IS NULL").catch(() => {});
+  await query("UPDATE promoters SET player_affiliate_link_normalized = player_affiliate_link_original WHERE player_affiliate_link_original IS NOT NULL AND player_affiliate_link_normalized IS NULL").catch(() => {});
+  await query("UPDATE players SET game_id_normalized = UPPER(TRIM(game_id)) WHERE game_id IS NOT NULL AND game_id_normalized IS NULL").catch(() => {});
+
+  // Generate missing player_referral_tokens
+  const crypto = require('crypto');
+  const missing = await query("SELECT id FROM promoters WHERE player_referral_token IS NULL");
+  for (const r of missing.rows) {
+    const token = crypto.randomBytes(16).toString('hex');
+    await query("UPDATE promoters SET player_referral_token = $1 WHERE id = $2", [token, r.id]).catch(() => {});
+  }
+
+  // Ensure indexes
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_link_norm ON agents(agent_link_normalized)").catch(() => {});
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_link_norm ON promoters(player_affiliate_link_normalized)").catch(() => {});
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_ref_token ON promoters(player_referral_token)").catch(() => {});
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_players_game_id_norm ON players(game_id_normalized)").catch(() => {});
+
   console.log('[DB] All tables initialized. Admins:', config.ADMIN_IDS);
 }
 

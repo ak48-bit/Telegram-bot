@@ -68,11 +68,6 @@ async function handleAddAgent(ctx) {
   const token = await createInviteToken('agent_bind', agentCode, ctx.from.id);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
 
-  // 自动生成 Agent Affiliate Link
-  const domain = (process.env.ALLOWED_DOMAINS || '90jilia2.com').split(',')[0].trim();
-  const agentPromo = `http://${domain}/?r=${agentCode}`;
-  await db.query(`UPDATE agents SET promo_url = $1 WHERE agent_code = $2`, [agentPromo, agentCode]);
-
   await audit.log(ctx.from.id, 'admin', 'create_agent', 'agent', agentCode, { name, token });
 
   return ctx.reply(
@@ -81,13 +76,11 @@ async function handleAddAgent(ctx) {
     `✅ Agent Created Successfully\n` +
     `Agent Code：<code>${agentCode}</code>\n` +
     `Name：${name}\n\n` +
-    `Agent Affiliate Link：\n` +
-    `${agentPromo}\n` +
-    `━━━━━━━━━━━━━━━\n\n` +
     `📋 Agent Bot Link：\n` +
     `${link}\n` +
     `━━━━━━━━━━━━━━━\n\n` +
-    `⚠️ One-time use only, valid for 48 hours`,
+    `⚠️ One-time use only, valid for 48 hours\n\n` +
+    `<i>After binding, Agent must use /set_promo to submit their Affiliate Link.</i>`,
     { parse_mode: 'HTML' }
   );
 }

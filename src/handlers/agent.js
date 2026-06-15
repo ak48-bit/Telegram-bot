@@ -46,10 +46,15 @@ async function handleAgent(ctx) {
     pmList += `\nAgent：<code>${pm.promoter_code}</code> ${pm.name}\n${tgLine}\nStatus：${statusIcon} ${statusText}\n${promoLine}\n`;
   }
 
+  const agentLinkLine = a.link_status === 'BOUND'
+    ? `Agent Affiliate Link：\n${a.player_affiliate_link}\n`
+    : `Agent Affiliate Link：NOT_SUBMITTED — /set_promo\n`;
+
   return ctx.reply(
-    `🏢 <b>Agent Panel</b>\n\n` +
+    `👥 <b>Agent</b>\n\n` +
     `Agent Code：<code>${a.agent_code}</code>\n` +
-    `Name：${a.name}\n\n` +
+    `Name：${a.name}\n` +
+    `${agentLinkLine}\n` +
     `Promoters：${s.promoters} total\n` +
     `Players：${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
     `<b>Promoter List：</b>` + (pmList || '\nNo Promoters') + '\n' +
@@ -100,11 +105,6 @@ async function handleAddPromoter(ctx) {
   const token = await createInviteToken('promoter_bind', promoterCode, uid);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
 
-  // 自动生成 Promoter Affiliate Link
-  const domain = (process.env.ALLOWED_DOMAINS || '90jilia2.com').split(',')[0].trim();
-  const promoUrl = `http://${domain}/?r=${promoterCode}`;
-  await db.query(`UPDATE promoters SET promo_url = $1 WHERE promoter_code = $2`, [promoUrl, promoterCode]);
-
   await audit.log(uid, 'agent', 'create_promoter', 'promoter', promoterCode, { name, token });
 
   return ctx.reply(
@@ -113,11 +113,10 @@ async function handleAddPromoter(ctx) {
     `✅ Promoter Created Successfully\n` +
     `Promoter Code：<code>${promoterCode}</code>\n` +
     `Name：${name}\n\n` +
-    `Promoter Affiliate Link：\n` +
-    `${promoUrl}\n\n` +
     `Promoter Bot Link：\n` +
     `${link}\n\n` +
-    `⚠️ One-time use only, valid for 48 hours`,
+    `⚠️ One-time use only, valid for 48 hours\n\n` +
+    `<i>After binding, Promoter must use /set_promo to submit their Affiliate Link.</i>`,
     { parse_mode: 'HTML' }
   );
 }
@@ -239,30 +238,58 @@ async function handleRelinkPromoter(ctx) {
 // /my_link — Agent 查看自己的推广链接
 async function handleAgentMyLink(ctx) {
   const uid = ctx.from.id;
-  const ag = await db.query('SELECT agent_code, promo_url FROM agents WHERE telegram_id = $1', [uid]);
+  const ag = await db.query('SELECT agent_code, player_affiliate_link, link_status FROM agents WHERE telegram_id = $1', [uid]);
   if (ag.rows.length === 0) return ctx.reply('Agent not bound.');
   const a = ag.rows[0];
   let msg = `👥 <b>Agent Affiliate Link</b>\n\n` +
     `Agent Code：<code>${a.agent_code}</code>\n`;
-  if (a.promo_url) {
-    msg += `Agent Affiliate Link：\n${a.promo_url}\n`;
+  if (a.link_status === 'BOUND' && a.player_affiliate_link) {
+    msg += `Agent Affiliate Link：\n${a.player_affiliate_link}\n`;
   } else {
-    msg += `Agent Affiliate Link：<i>Not set — /set_promo</i>\n`;
+    msg += `Agent Affiliate Link：<i>Not Submitted — /set_promo</i>\n`;
   }
   msg += `\nShare this link with promoters or players.`;
   return ctx.reply(msg, { parse_mode: 'HTML' });
 }
 
-// /set_agent_promo http://domain/?r=code
+// /set_promo http://domain/?r=code — Agent 手动提交
 async function handleAgentSetPromo(ctx) {
   const uid = ctx.from.id;
   const text = ctx.message.text.trim();
   const parts = text.split(/\s+/);
   if (parts.length < 2) return ctx.reply('Format: <code>/set_promo http://domain/?r=your_code</code>', { parse_mode: 'HTML' });
   const url = parts[1];
-  if (!url.startsWith('http')) return ctx.reply('URL must start with http:// or https://.');
-  await db.query('UPDATE agents SET promo_url = $1 WHERE telegram_id = $2', [url, uid]);
-  return ctx.reply(`✅ Agent Affiliate Link set!\n\n${url}`, { parse_mode: 'HTML' });
+
+  if (!url.startsWith('http')) {
+    await audit.log(uid, 'agent', 'submit_invalid_link', 'agent', null, { url, reason: 'invalid_format' });
+    return ctx.reply('Invalid link format.');
+  }
+
+  const ag = await db.query('SELECT * FROM agents WHERE telegram_id = $1', [uid]);
+  if (ag.rows.length === 0) return ctx.reply('Agent not bound.');
+  const agent = ag.rows[0];
+
+  if (agent.link_status === 'BOUND' && agent.player_affiliate_link) {
+    await audit.log(uid, 'agent', 'submit_duplicate_own', 'agent', agent.agent_code, { url });
+    return ctx.reply('You have already submitted your Player Affiliate Link.');
+  }
+
+  const dup = await db.query(
+    'SELECT agent_code FROM agents WHERE player_affiliate_link = $1 AND telegram_id != $2',
+    [url, uid]
+  );
+  if (dup.rows.length > 0) {
+    await audit.log(uid, 'agent', 'submit_duplicate_link', 'agent', agent.agent_code, { url, conflict_with: dup.rows[0].agent_code });
+    return ctx.reply('This link has already been used.');
+  }
+
+  await db.query(
+    `UPDATE agents SET player_affiliate_link = $1, link_status = 'BOUND', updated_at = NOW() WHERE telegram_id = $2`,
+    [url, uid]
+  );
+  await audit.log(uid, 'agent', 'submit_link_success', 'agent', agent.agent_code, { url });
+
+  return ctx.reply('Submitted Successfully\nAgent Link Bound Successfully');
 }
 
 module.exports = {

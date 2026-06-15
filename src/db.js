@@ -55,6 +55,8 @@ async function initDB() {
       telegram_id BIGINT UNIQUE REFERENCES users(telegram_id),
       name TEXT NOT NULL,
       promo_url TEXT,
+      player_affiliate_link TEXT UNIQUE,
+      link_status TEXT DEFAULT 'NOT_SUBMITTED' CHECK (link_status IN ('NOT_SUBMITTED','BOUND')),
       status TEXT DEFAULT 'active' CHECK (status IN ('active','blocked','pending')),
       created_by_admin_id BIGINT REFERENCES users(telegram_id),
       created_at TIMESTAMP DEFAULT NOW(),
@@ -142,6 +144,10 @@ async function initDB() {
   // 兼容旧表迁移
   await query('ALTER TABLE promoters ADD COLUMN IF NOT EXISTS promo_url TEXT').catch(() => {});
   await query('ALTER TABLE agents ADD COLUMN IF NOT EXISTS promo_url TEXT').catch(() => {});
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS player_affiliate_link TEXT").catch(() => {});
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'").catch(() => {});
+  await query("UPDATE agents SET player_affiliate_link = promo_url, link_status = 'BOUND' WHERE promo_url IS NOT NULL AND player_affiliate_link IS NULL AND promo_url != ''").catch(() => {});
+  await query("ALTER TABLE agents ADD CONSTRAINT IF NOT EXISTS unique_agent_player_link UNIQUE (player_affiliate_link)").catch(() => {});
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link TEXT").catch(() => {});
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'").catch(() => {});
   // 迁移旧数据：如果 promo_url 有值但 player_affiliate_link 为空，迁移过去

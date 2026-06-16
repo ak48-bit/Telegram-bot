@@ -39,6 +39,24 @@ bot.command('apply_agent', async (ctx) => {
 bot.command('ping', async (ctx) => {
   return ctx.reply('pong 🚀 deploy=' + require('../package.json').version);
 });
+bot.command('diag', async (ctx) => {
+  const db = require('./db');
+  const steps = [];
+  try {
+    steps.push('1-connect');
+    const r1 = await db.query('SELECT 1 as ok');
+    steps.push('2-db-ok');
+    const r2 = await db.query('SELECT COUNT(*) FROM rate_limits');
+    steps.push('3-rate_limits-ok cnt=' + r2.rows[0].count);
+    const r3 = await db.query("SELECT COUNT(*) FROM agents WHERE approval_status = 'approved'");
+    steps.push('4-agents-ok');
+    const r4 = await db.query('SELECT COUNT(*) FROM audit_logs');
+    steps.push('5-audit-ok');
+    return ctx.reply('DIAG: ' + steps.join(' → '));
+  } catch (e) {
+    return ctx.reply('DIAG FAIL at ' + steps[steps.length-1] + ': ' + e.message);
+  }
+});
 bot.command('my', requireRole('player', 'admin', 'agent', 'promoter'), handlePlayerMy);
 
 // Admin

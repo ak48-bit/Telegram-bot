@@ -55,8 +55,15 @@ async function handleAgent(ctx) {
     `Promoters：${s.promoters} total\n` +
     `Players：${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
     `<b>Promoter List：</b>` + (pmList || '\nNo Promoters') + '\n' +
-    `/my_agent_link | /set_agent_link | /add_promoter | /update_promoter_link | /relink_pm | /list_my_promoters | /list_my_players | /export_my_players`,
-    { parse_mode: 'HTML' }
+    ``,
+    {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📊 Refresh', callback_data: 'cmd:/agent' }, { text: '➕ Add Promoter', callback_data: 'cmd:/add_promoter' }],
+        [{ text: '🔗 Set Agent Link', callback_data: 'cmd:/set_agent_link' }, { text: '📋 My Link', callback_data: 'cmd:/my_agent_link' }],
+        [{ text: '👥 My Promoters', callback_data: 'cmd:/list_my_promoters' }, { text: '🎮 My Players', callback_data: 'cmd:/list_my_players' }],
+      ]}
+    }
   );
 }
 

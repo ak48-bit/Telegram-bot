@@ -154,6 +154,14 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'session_confirm' || data === 'session_cancel') {
     return handleSessionCallback(ctx);
   }
+  // Command buttons: cmd:/agent → simulate command
+  if (data.startsWith('cmd:')) {
+    const cmd = data.slice(4);
+    await ctx.answerCbQuery().catch(() => {});
+    await ctx.deleteMessage().catch(() => {});
+    ctx.message.text = cmd;
+    return bot.handleUpdate({ message: ctx.message });
+  }
   // Inline approve/reject agent buttons
   if (data.startsWith('approve_agent_')) {
     const code = data.replace('approve_agent_', '');

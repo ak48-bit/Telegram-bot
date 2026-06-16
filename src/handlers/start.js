@@ -36,9 +36,20 @@ async function handleBindToken(ctx, payload, uid) {
       await db.query(`UPDATE users SET role = 'agent', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
       await db.query(`UPDATE agents SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE agent_code = $2`, [uid, code]);
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
+      const { cmdButtons } = require('../services/cmdButtons');
       return ctx.reply(
-        `👥 <b>Agent Bound Successfully!</b>\n\nAgent Code：<code>${code}</code>\n\n⚠️ Use /set_agent_link to submit your Agent Link.\n\nCommands：/agent | /add_promoter | /list_my_promoters | /list_my_players | /my_agent_link | /set_agent_link | /relink_pm`,
-        { parse_mode: 'HTML' }
+        `👥 <b>Agent Bound Successfully!</b>\n\nAgent Code：<code>${code}</code>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: cmdButtons([
+            ['/agent', '📊 Agent Panel'],
+            ['/set_agent_link', '🔗 Set Agent Link'],
+            ['/add_promoter', '➕ Add Promoter'],
+            ['/list_my_promoters', '👥 My Promoters'],
+            ['/list_my_players', '🎮 My Players'],
+            ['/my_agent_link', '📋 My Link'],
+          ])
+        }
       );
     }
     if (type === 'promoter_bind') {

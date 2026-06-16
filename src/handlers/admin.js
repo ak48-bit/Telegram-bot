@@ -402,19 +402,25 @@ async function handleApproveAgent(ctx) {
 
   await audit.log(ctx.from.id, 'admin', 'approve_agent_application', 'agent', code);
 
-  // Notify the applicant
+  // Notify the applicant with command buttons
   const applicantTgId = ag.rows[0].telegram_id;
   if (applicantTgId) {
     try {
+      const { cmdButtons } = require('../services/cmdButtons');
       await ctx.telegram.sendMessage(applicantTgId,
         `✅ <b>Agent Approved.</b>\n\n` +
-        `Agent Code: <code>${code}</code>\n\n` +
-        `You can now use:\n` +
-        `/agent\n` +
-        `/add_promoter\n` +
-        `/set_agent_link\n` +
-        `/my_agent_link`,
-        { parse_mode: 'HTML' }
+        `Agent Code: <code>${code}</code>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: cmdButtons([
+            ['/agent', '📊 Agent Panel'],
+            ['/add_promoter', '➕ Add Promoter'],
+            ['/set_agent_link', '🔗 Set Agent Link'],
+            ['/my_agent_link', '📋 My Link'],
+            ['/list_my_promoters', '👥 My Promoters'],
+            ['/list_my_players', '🎮 My Players'],
+          ])
+        }
       );
     } catch (e) {
       console.error(`[Notify Applicant ${applicantTgId}] Failed:`, e.message);
@@ -486,12 +492,23 @@ async function handleApproveAgentCb(ctx, code) {
     [uid, code]
   );
   await audit.log(uid, 'admin', 'approve_agent_application', 'agent', code);
-  // Notify applicant
+  // Notify applicant with command buttons
   if (ag.rows[0].telegram_id) {
     try {
+      const { cmdButtons } = require('../services/cmdButtons');
       await ctx.telegram.sendMessage(ag.rows[0].telegram_id,
-        `✅ <b>Agent Approved.</b>\n\nAgent Code: <code>${code}</code>\n\nYou can now use:\n/agent\n/add_promoter\n/set_agent_link\n/my_agent_link`,
-        { parse_mode: 'HTML' }
+        `✅ <b>Agent Approved.</b>\n\nAgent Code: <code>${code}</code>`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: cmdButtons([
+            ['/agent', '📊 Agent Panel'],
+            ['/add_promoter', '➕ Add Promoter'],
+            ['/set_agent_link', '🔗 Set Agent Link'],
+            ['/my_agent_link', '📋 My Link'],
+            ['/list_my_promoters', '👥 My Promoters'],
+            ['/list_my_players', '🎮 My Players'],
+          ])
+        }
       );
     } catch (e) {
       console.error(`[Notify ${ag.rows[0].telegram_id}] Failed:`, e.message);

@@ -36,6 +36,9 @@ async function handleAdmin(ctx) {
     `/list_pending — Pending Game IDs\n` +
     `/approve_game TGID — Approve\n` +
     `/reject_game TGID — Reject\n` +
+    `/list_agent_applications — Pending Agent Applications\n` +
+    `/approve_agent Code — Approve Agent\n` +
+    `/reject_agent Code — Reject Agent\n` +
     `/export_players — Export All Players`,
     { parse_mode: 'HTML' }
   );
@@ -63,10 +66,10 @@ async function handleAddAgent(ctx) {
     return ctx.reply(`❌ Agent Code <code>${agentCode}</code> already exists.`, { parse_mode: 'HTML' });
   }
 
-  // 创建 agent 记录（先不绑定 telegram_id）
+  // 创建 agent 记录（先不绑定 telegram_id），approval_status = approved
   await db.query(
-    `INSERT INTO agents (agent_code, name, created_by_admin_id, status)
-     VALUES ($1, $2, $3, 'pending')`,
+    `INSERT INTO agents (agent_code, name, created_by_admin_id, status, approval_status)
+     VALUES ($1, $2, $3, 'pending', 'approved')`,
     [agentCode, name, ctx.from.id]
   );
 
@@ -341,10 +344,138 @@ async function handleResetPlayerLink(ctx) {
   return ctx.reply(`✅ Promoter <code>${code}</code> link reset to NOT_SUBMITTED. Promoter can re-submit with /set_player_link.`, { parse_mode: 'HTML' });
 }
 
+// /list_agent_applications
+async function handleListAgentApplications(ctx) {
+  await audit.log(ctx.from.id, 'admin', 'list_agent_applications', null, null);
+  const res = await db.query(
+    `SELECT agent_code, name, telegram_id, username, created_at
+     FROM agents WHERE approval_status = 'pending'
+     ORDER BY created_at ASC`
+  );
+  if (res.rows.length === 0) {
+    return ctx.reply('No pending Agent applications.');
+  }
+
+  const lines = ['👥 <b>Pending Agent Applications</b>\n'];
+  for (let i = 0; i < res.rows.length; i++) {
+    const r = res.rows[i];
+    const un = r.username ? `@${r.username}` : '-';
+    const tg = r.telegram_id ? `<code>${r.telegram_id}</code>` : '-';
+    const appliedAt = r.created_at ? new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 16) : '-';
+    lines.push(
+      `${i + 1}. <b>Agent Code:</b> <code>${r.agent_code}</code>\n` +
+      `   <b>Name:</b> ${r.name}\n` +
+      `   <b>Telegram ID:</b> ${tg}\n` +
+      `   <b>Username:</b> ${un}\n` +
+      `   <b>Applied At:</b> ${appliedAt}\n`
+    );
+  }
+  lines.push('\n<b>Approve:</b>\n<code>/approve_agent &lt;code&gt;</code>');
+  lines.push('\n<b>Reject:</b>\n<code>/reject_agent &lt;code&gt;</code>');
+
+  return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+}
+
+// /approve_agent <agent_code>
+async function handleApproveAgent(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) {
+    return ctx.reply('Format: <code>/approve_agent AgentCode</code>', { parse_mode: 'HTML' });
+  }
+  const code = parts[1];
+
+  const ag = await db.query(
+    `SELECT * FROM agents WHERE agent_code = $1`, [code]
+  );
+  if (ag.rows.length === 0) {
+    return ctx.reply('Agent application not found.');
+  }
+  if (ag.rows[0].approval_status !== 'pending') {
+    return ctx.reply('Agent application is not pending.');
+  }
+
+  const now = new Date();
+  await db.query(
+    `UPDATE agents SET approval_status = 'approved', approved_by = $1, approved_at = NOW(), updated_at = NOW() WHERE agent_code = $2`,
+    [ctx.from.id, code]
+  );
+
+  await audit.log(ctx.from.id, 'admin', 'approve_agent_application', 'agent', code);
+
+  // Notify the applicant
+  const applicantTgId = ag.rows[0].telegram_id;
+  if (applicantTgId) {
+    try {
+      await ctx.telegram.sendMessage(applicantTgId,
+        `✅ <b>Agent Approved.</b>\n\n` +
+        `Agent Code: <code>${code}</code>\n\n` +
+        `You can now use:\n` +
+        `/agent\n` +
+        `/add_promoter\n` +
+        `/set_agent_link\n` +
+        `/my_agent_link`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      console.error(`[Notify Applicant ${applicantTgId}] Failed:`, e.message);
+    }
+  }
+
+  return ctx.reply(
+    `✅ Agent approved successfully.\nAgent Code: <code>${code}</code>`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+// /reject_agent <agent_code>
+async function handleRejectAgent(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) {
+    return ctx.reply('Format: <code>/reject_agent AgentCode</code>', { parse_mode: 'HTML' });
+  }
+  const code = parts[1];
+
+  const ag = await db.query(
+    `SELECT * FROM agents WHERE agent_code = $1`, [code]
+  );
+  if (ag.rows.length === 0) {
+    return ctx.reply('Agent application not found.');
+  }
+  if (ag.rows[0].approval_status !== 'pending') {
+    return ctx.reply('Agent application is not pending.');
+  }
+
+  await db.query(
+    `UPDATE agents SET approval_status = 'rejected', rejected_by = $1, rejected_at = NOW(), updated_at = NOW() WHERE agent_code = $2`,
+    [ctx.from.id, code]
+  );
+
+  await audit.log(ctx.from.id, 'admin', 'reject_agent_application', 'agent', code);
+
+  // Notify the applicant
+  const applicantTgId = ag.rows[0].telegram_id;
+  if (applicantTgId) {
+    try {
+      await ctx.telegram.sendMessage(applicantTgId,
+        `❌ <b>Agent Application Rejected.</b>\n\nPlease contact Admin.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      console.error(`[Notify Applicant ${applicantTgId}] Failed:`, e.message);
+    }
+  }
+
+  return ctx.reply(
+    `✅ Agent application rejected.\nAgent Code: <code>${code}</code>`,
+    { parse_mode: 'HTML' }
+  );
+}
+
 module.exports = {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
   handleListPlayers, handleBlockAgent, handleBlockPromoter,
   handleChangePlayerOwner, handleExportPlayers,
   handleListPending, handleApproveGame, handleRejectGame,
   handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
+  handleListAgentApplications, handleApproveAgent, handleRejectAgent,
 };

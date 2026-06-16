@@ -79,4 +79,55 @@ function validateAndNormalize(raw, allowedDomains) {
   return { valid: true, normalized, original: url };
 }
 
-module.exports = { normalizeLink, isDomainAllowed, validateAndNormalize };
+/**
+ * Validate a promoter affiliate link with extra rules:
+ * - must contain exactly one ?r= param
+ * - r param length 3-64
+ * - r param only A-Z a-z 0-9 _ -
+ * - no @, spaces, <>, javascript:, data:, Chinese
+ * - normalized link must be unique (caller checks DB)
+ * Returns { valid, normalized, original, error }
+ */
+function validatePromoterLink(raw, allowedDomains, allowHttp = false) {
+  // Step 1: basic URL validation + domain check
+  const basic = validateAndNormalize(raw, allowedDomains);
+  if (!basic.valid) return basic;
+
+  // Step 2: check HTTPS requirement
+  try {
+    const u = new URL(basic.original);
+    if (!allowHttp && u.protocol !== 'https:') {
+      return { valid: false, error: 'Invalid affiliate link format.' };
+    }
+  } catch {
+    return { valid: false, error: 'Invalid affiliate link format.' };
+  }
+
+  // Step 3: check r parameter
+  try {
+    const u = new URL(basic.original);
+    const rValues = u.searchParams.getAll('r');
+    if (rValues.length !== 1) {
+      return { valid: false, error: 'Invalid affiliate link format.' };
+    }
+    const rVal = rValues[0];
+    if (rVal.length < 3 || rVal.length > 64) {
+      return { valid: false, error: 'Invalid affiliate link format.' };
+    }
+    if (!/^[A-Za-z0-9_-]+$/.test(rVal)) {
+      return { valid: false, error: 'Invalid affiliate link format.' };
+    }
+  } catch {
+    return { valid: false, error: 'Invalid affiliate link format.' };
+  }
+
+  // Step 4: check for forbidden content in the URL
+  const rawLower = basic.original.toLowerCase();
+  if (/[@\s<>]/.test(basic.original) || /javascript:/i.test(rawLower) || /data:/i.test(rawLower) || /[一-鿿]/.test(basic.original)) {
+    return { valid: false, error: 'Invalid affiliate link format.' };
+  }
+
+  return basic; // { valid: true, normalized, original }
+}
+
+module.exports = { normalizeLink, isDomainAllowed, validateAndNormalize, validatePromoterLink };

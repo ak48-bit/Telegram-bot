@@ -21,7 +21,7 @@ async function handlePromoter(ctx) {
 
   const linkLine = p.link_status === 'BOUND'
     ? `Player Affiliate Link：\n${p.player_affiliate_link_original}`
-    : 'Player Affiliate Link：NOT_SUBMITTED — /set_player_link';
+    : 'Player Affiliate Link：Not Set\n<i>Please contact your Agent.</i>';
 
   return ctx.reply(
     `📢 <b>Promoter</b>\n\n` +
@@ -33,7 +33,8 @@ async function handlePromoter(ctx) {
     `${linkLine}\n` +
     `Link Status：${p.link_status || 'NOT_SUBMITTED'}\n\n` +
     `Players：${s.total} total | 🆕 Today: ${s.today}\n\n` +
-    `/my_link | /set_player_link | /my_players | /my_today | /share`,
+    `/my_link | /my_players | /my_today | /share\n\n` +
+    `<i>Your link is managed by your Agent.\nUse /share to get your sharing message.</i>`,
     { parse_mode: 'HTML' }
   );
 }
@@ -60,56 +61,19 @@ async function handleMyLink(ctx) {
   if (p.link_status === 'BOUND' && p.player_affiliate_link_original) {
     msg += `Player Affiliate Link：\n${p.player_affiliate_link_original}\n`;
   } else {
-    msg += `Player Affiliate Link：<i>Not Submitted — /set_player_link</i>\n`;
+    msg += `Player Affiliate Link：<i>Not Set — Please contact your Agent</i>\n`;
   }
-  msg += `\n<b>Players Bot Share Link：</b>\n${link}\n\n1️⃣ Submit link → 2️⃣ Send bot link to players`;
+  msg += `\n<b>Players Bot Share Link：</b>\n${link}\n\n1️⃣ Link set by Agent → 2️⃣ Send bot link to players`;
   return ctx.reply(msg, { parse_mode: 'HTML' });
 }
 
-// /set_player_link
+// /set_player_link — DENIED: Promoters can no longer self-submit links
 async function handleSetPlayerLink(ctx) {
   const uid = ctx.from.id;
-  const text = ctx.message.text.trim();
-  const parts = text.split(/\s+/);
-  if (parts.length < 2) {
-    const session = require('../services/session');
-    session.set(uid, { action: 'set_player_link', data: {}, userRole: 'promoter' });
-    await audit.log(uid, 'promoter', 'step_set_player_link_started', null, null, {});
-    return ctx.reply('Please send your Player Affiliate Link:');
-  }
-  const raw = parts[1];
-
-  const result = validateAndNormalize(raw, config.ALLOWED_DOMAINS);
-  if (!result.valid) {
-    await audit.log(uid, 'promoter', 'set_player_link_invalid', 'promoter', null, { url: raw });
-    return ctx.reply('Invalid link format.');
-  }
-
-  const pm = await db.query('SELECT * FROM promoters WHERE telegram_id = $1', [uid]);
-  if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
-  const promoter = pm.rows[0];
-
-  if (promoter.link_status === 'BOUND' && promoter.player_affiliate_link_normalized) {
-    await audit.log(uid, 'promoter', 'set_player_link_duplicate_own', 'promoter', promoter.promoter_code, { url: raw });
-    return ctx.reply('You have already submitted your Player Affiliate Link.');
-  }
-
-  const dup = await db.query(
-    'SELECT promoter_code FROM promoters WHERE player_affiliate_link_normalized = $1 AND telegram_id != $2',
-    [result.normalized, uid]
+  await audit.log(uid, 'promoter', 'promoter_set_promo_denied', 'promoter', null);
+  return ctx.reply(
+    'Promoter link is managed by your Agent.\nPlease contact your Agent if you need to update your link.'
   );
-  if (dup.rows.length > 0) {
-    await audit.log(uid, 'promoter', 'set_player_link_duplicate_link', 'promoter', promoter.promoter_code, { url: raw, conflict: dup.rows[0].promoter_code });
-    return ctx.reply('This link has already been used.');
-  }
-
-  await db.query(
-    `UPDATE promoters SET player_affiliate_link_original = $1, player_affiliate_link_normalized = $2, link_status = 'BOUND', updated_at = NOW() WHERE telegram_id = $3`,
-    [result.original, result.normalized, uid]
-  );
-  await audit.log(uid, 'promoter', 'set_player_link_success', 'promoter', promoter.promoter_code, { url: result.normalized });
-
-  return ctx.reply('Submitted Successfully\nPromoter Link Bound Successfully');
 }
 
 // /set_promo — legacy redirect for both roles
@@ -181,7 +145,11 @@ async function handleShare(ctx) {
   const p = pm.rows[0];
 
   if (p.link_status !== 'BOUND' || !p.player_affiliate_link_original) {
-    return ctx.reply('⚠️ You must submit your Player Affiliate Link first.\n\nUse /set_player_link to submit.', { parse_mode: 'HTML' });
+    await audit.log(uid, 'promoter', 'promoter_link_missing_contact_agent', 'promoter', p.promoter_code);
+    return ctx.reply(
+      'Your Promoter link has not been set.\nPlease contact your Agent.',
+      { parse_mode: 'HTML' }
+    );
   }
 
   // Ensure player_referral_token

@@ -11,6 +11,9 @@ async function handleStart(ctx) {
   const uid = ctx.from.id;
   const user = ctx.state.user;
 
+  if (payload === 'apply_agent') {
+    return handleApplyAgent(ctx, uid);
+  }
   if (payload.startsWith('bind_agent_') || payload.startsWith('bind_promoter_')) {
     return handleBindToken(ctx, payload, uid);
   }
@@ -47,7 +50,7 @@ async function handleBindToken(ctx, payload, uid) {
       await db.query(`UPDATE promoters SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE promoter_code = $2`, [uid, code]);
       await audit.log(uid, 'promoter', 'promoter_bind', 'promoter', code);
       return ctx.reply(
-        `📢 <b>Promoter Bound Successfully!</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${pm.rows[0].agent_code}\n\n⚠️ Use /set_player_link to submit your Player Link.\n\nCommands：/promoter | /my_link | /set_player_link | /my_players | /share`,
+        `📢 <b>Promoter Bound Successfully!</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${pm.rows[0].agent_code}\n\nYour Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.\n\nCommands：/promoter | /my_link | /my_players | /share`,
         { parse_mode: 'HTML' }
       );
     }
@@ -113,4 +116,60 @@ async function handlePlainStart(ctx, user) {
   return ctx.reply(texts[user.role] || `🤖 <b>Welcome!</b>\n\nIf you have a referral link, please use it to enter.`);
 }
 
-module.exports = { handleStart };
+// ═══ Agent Self-Application ═══
+async function handleApplyAgent(ctx, uid) {
+  const session = require('../services/session');
+  const audit = require('../services/audit');
+
+  // Rate limit: per minute
+  const rateRes = await db.query(
+    `SELECT COUNT(*) FROM rate_limits WHERE telegram_id = $1 AND attempt_type = 'apply_agent' AND created_at > NOW() - INTERVAL '1 minute'`,
+    [uid]
+  );
+  if (parseInt(rateRes.rows[0].count) >= config.AGENT_APPLY_RATE_LIMITS.perMinute) {
+    await audit.log(uid, 'player', 'agent_application_rate_limited', null, null, { attempt_type: 'apply_agent_per_minute' });
+    return ctx.reply('Too many attempts. Please try again later.');
+  }
+
+  // Record rate limit
+  await db.query(`INSERT INTO rate_limits (telegram_id, attempt_type) VALUES ($1, 'apply_agent')`, [uid]);
+
+  // Check if already an approved agent
+  const existingApproved = await db.query(
+    `SELECT agent_code FROM agents WHERE telegram_id = $1 AND approval_status = 'approved'`, [uid]
+  );
+  if (existingApproved.rows.length > 0) {
+    await audit.log(uid, 'agent', 'agent_application_duplicate_user', 'agent', existingApproved.rows[0].agent_code);
+    return ctx.reply('You already have an Agent account.');
+  }
+
+  // Check if already has a pending application
+  const existingPending = await db.query(
+    `SELECT agent_code FROM agents WHERE telegram_id = $1 AND approval_status = 'pending'`, [uid]
+  );
+  if (existingPending.rows.length > 0) {
+    await audit.log(uid, 'player', 'agent_application_duplicate_pending', 'agent', existingPending.rows[0].agent_code);
+    return ctx.reply('You already have a pending Agent application.\nPlease wait for Admin review.');
+  }
+
+  // Check rejected rate limit (max 3 per day) — count from audit_logs
+  const rejectedCount = await db.query(
+    `SELECT COUNT(*) FROM audit_logs WHERE actor_telegram_id = $1 AND action = 'reject_agent_application' AND created_at > NOW() - INTERVAL '1 day'`,
+    [uid]
+  );
+  if (parseInt(rejectedCount.rows[0].count) >= 3) {
+    await audit.log(uid, 'player', 'agent_application_rate_limited', null, null, { attempt_type: 'rejected_daily_limit' });
+    return ctx.reply('Too many attempts. Please try again later.');
+  }
+
+  // Start Step Mode
+  await audit.log(uid, 'player', 'agent_application_started', null, null);
+  session.set(uid, { action: 'apply_agent_code', data: {}, userRole: 'player', cancelAudit: 'step_apply_agent_cancelled' });
+
+  return ctx.reply(
+    `👥 <b>Agent Application</b>\n\nPlease submit your Agent Code.\n\nExample:\nLeo01`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+module.exports = { handleStart, handleApplyAgent };

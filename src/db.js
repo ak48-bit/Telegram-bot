@@ -114,6 +114,13 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      id SERIAL PRIMARY KEY,
+      telegram_id BIGINT NOT NULL,
+      attempt_type TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_code ON agents(agent_code);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_code ON promoters(promoter_code);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_link_norm ON agents(agent_link_normalized);
@@ -139,10 +146,21 @@ async function initDB() {
   await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_original TEXT");
   await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_link_normalized TEXT");
   await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'approved'");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS username TEXT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS applied_by_telegram_id BIGINT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS approved_by BIGINT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS rejected_by BIGINT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_original TEXT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_affiliate_link_normalized TEXT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS player_referral_token TEXT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS created_by_agent_id BIGINT");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS created_by_telegram_id BIGINT");
+  // Drop FK on created_by_agent_id if it references users(telegram_id) — we store agents.id now
+  await query("ALTER TABLE promoters DROP CONSTRAINT IF EXISTS promoters_created_by_agent_id_fkey").catch(() => {});
   await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT");
 
   // Migrate old data — fail on conflict so admin can resolve manually
@@ -189,8 +207,11 @@ async function initDB() {
   await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_link_norm ON promoters(player_affiliate_link_normalized)");
   await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_promoters_ref_token ON promoters(player_referral_token)");
   await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_players_game_id_norm ON players(game_id_normalized)");
+  await query("CREATE INDEX IF NOT EXISTS idx_agents_approval ON agents(approval_status)");
+  await query("CREATE INDEX IF NOT EXISTS idx_rate_limits_telegram ON rate_limits(telegram_id, attempt_type)");
+  await query("CREATE INDEX IF NOT EXISTS idx_rate_limits_created ON rate_limits(created_at)");
 
-  console.log('[DB] All tables initialized. Admins:', config.ADMIN_IDS);
+  console.log('[DB] Schema migration completed.');
 }
 
 module.exports = { query, pool, initDB };

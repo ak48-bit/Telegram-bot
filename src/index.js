@@ -4,17 +4,20 @@ const config = require('./config');
 const { initDB } = require('./db');
 const { ensureUser, checkBlocked, requireRole } = require('./middleware/auth');
 const { handleStart } = require('./handlers/start');
+const { handleApplyAgent } = require('./handlers/start');
 const {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
   handleListPlayers, handleBlockAgent, handleBlockPromoter,
   handleChangePlayerOwner, handleExportPlayers,
   handleListPending, handleApproveGame, handleRejectGame,
   handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
+  handleListAgentApplications, handleApproveAgent, handleRejectAgent,
 } = require('./handlers/admin');
 const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
   handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
   handleSetAgentLink, handleMyAgentLink, handleAgentSetPromoCompat,
+  handleUpdatePromoterLink,
 } = require('./handlers/agent');
 const {
   handlePromoter, handleMyLink, handleMyPlayers, handleMyToday,
@@ -29,6 +32,9 @@ bot.use(checkBlocked);
 
 // Generic
 bot.start(handleStart);
+bot.command('apply_agent', async (ctx) => {
+  return handleApplyAgent(ctx, ctx.from.id);
+});
 bot.command('my', requireRole('player', 'admin', 'agent', 'promoter'), handlePlayerMy);
 
 // Admin
@@ -47,6 +53,9 @@ bot.command('reject_game', requireRole('admin'), handleRejectGame);
 bot.command('relink_agent', requireRole('admin'), handleRelinkAgent);
 bot.command('reset_agent_link', requireRole('admin'), handleResetAgentLink);
 bot.command('reset_player_link', requireRole('admin'), handleResetPlayerLink);
+bot.command('list_agent_applications', requireRole('admin'), handleListAgentApplications);
+bot.command('approve_agent', requireRole('admin'), handleApproveAgent);
+bot.command('reject_agent', requireRole('admin'), handleRejectAgent);
 
 // Agent
 bot.command('agent', requireRole('agent'), handleAgent);
@@ -57,6 +66,7 @@ bot.command('export_my_players', requireRole('agent'), handleExportMyPlayers);
 bot.command('relink_pm', requireRole('agent'), handleRelinkPromoter);
 bot.command('set_agent_link', requireRole('agent'), handleSetAgentLink);
 bot.command('my_agent_link', requireRole('agent'), handleMyAgentLink);
+bot.command('update_promoter_link', requireRole('agent'), handleUpdatePromoterLink);
 
 // Agent + Promoter shared legacy
 bot.command('set_promo', requireRole('agent', 'promoter'), async (ctx) => {
@@ -102,6 +112,25 @@ bot.command('cancel', async (ctx) => {
     return ctx.reply('Cancelled.');
   }
   return ctx.reply('No active session to cancel.');
+});
+
+// /help
+bot.command('help', async (ctx) => {
+  const user = ctx.state.user;
+  const isAdmin = config.ADMIN_IDS.includes(ctx.from.id);
+  let text = '';
+  if (isAdmin) {
+    text = '<b>Admin Commands:</b>\n/admin /add_agent /list_agents /list_promoters /list_players\n/list_agent_applications /approve_agent /reject_agent\n/block_agent /block_promoter /change_player_owner\n/export_players /list_pending /approve_game /reject_game\n/relink_agent /reset_agent_link /reset_player_link\n';
+  }
+  if (user.role === 'agent') {
+    text += '\n<b>Agent Commands:</b>\n/agent /add_promoter /list_my_promoters /list_my_players\n/set_agent_link /my_agent_link /relink_pm /export_my_players\n/update_promoter_link &lt;code&gt; &lt;link&gt; — Update promoter link\n';
+  }
+  if (user.role === 'promoter') {
+    text += '\n<b>Promoter Commands:</b>\n/promoter — View panel\n/my_link — View your link\n/share — Get sharing message\n/my_players — View summary\n/my_today — View today stats\n';
+  }
+  text += '\n<b>Player Commands:</b>\n/submit /my\n';
+  text += '\n<b>General:</b>\n/start apply_agent — Apply to become an Agent\n/cancel — Cancel current action';
+  return ctx.reply(text, { parse_mode: 'HTML' });
 });
 
 // Callback handler for Confirm/Cancel inline buttons

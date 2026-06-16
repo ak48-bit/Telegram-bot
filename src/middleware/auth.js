@@ -47,9 +47,21 @@ function requireRole(...roles) {
     }
     // 额外：检查 agent/promoter 的 status
     if (user.role === 'agent') {
-      const ag = await db.query('SELECT status FROM agents WHERE telegram_id = $1', [user.telegram_id]);
-      if (ag.rows.length > 0 && ag.rows[0].status === 'blocked') {
-        return ctx.reply('🚫 Your Agent account has been blocked.');
+      const ag = await db.query('SELECT status, approval_status FROM agents WHERE telegram_id = $1', [user.telegram_id]);
+      if (ag.rows.length > 0) {
+        if (ag.rows[0].status === 'blocked') {
+          return ctx.reply('🚫 Your Agent account has been blocked.');
+        }
+        if (ag.rows[0].approval_status === 'pending') {
+          const audit = require('../services/audit');
+          audit.log(user.telegram_id, 'agent', 'agent_pending_access_denied', 'agent', null).catch(() => {});
+          return ctx.reply('Your Agent application is still pending review.');
+        }
+        if (ag.rows[0].approval_status === 'rejected') {
+          const audit = require('../services/audit');
+          audit.log(user.telegram_id, 'agent', 'agent_rejected_access_denied', 'agent', null).catch(() => {});
+          return ctx.reply('Your Agent application was rejected. Please contact Admin.');
+        }
       }
     }
     if (user.role === 'promoter') {

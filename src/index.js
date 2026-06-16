@@ -180,7 +180,7 @@ async function start() {
       if (req.headers['x-telegram-bot-api-secret-token'] !== config.SECRET_TOKEN) {
         return res.status(403).json({ ok: false, error: 'unauthorized' });
       }
-      res.sendStatus(200);
+      res.status(200).json({ ok: true });
       setImmediate(() => {
         bot.handleUpdate(req.body).catch(err => console.error('[WEBHOOK ASYNC]', err.message));
       });

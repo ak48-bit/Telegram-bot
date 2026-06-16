@@ -7,12 +7,16 @@ const { handleStart } = require('./handlers/start');
 const { handleApplyAgent } = require('./handlers/start');
 const {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
-  handleListPlayers, handleBlockAgent, handleBlockPromoter,
+  handleListPlayers, handleBlockAgent, handleBlockPromoter, handleBlockPlayer,
+  handleUnblockAgent, handleUnblockPromoter, handleUnblockPlayer,
   handleChangePlayerOwner, handleExportPlayers,
   handleListPending, handleApproveGame, handleRejectGame,
   handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
   handleListAgentApplications, handleApproveAgent, handleRejectAgent,
   handleApproveAgentCb, handleRejectAgentCb,
+  handleSystemStatus, handleAuditRecent,
+  handleFindPlayer, handleFindPromoter, handleFindAgent,
+  handleAdminPanelButtons,
 } = require('./handlers/admin');
 const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
@@ -27,6 +31,7 @@ const {
 const { handleSubmit, handlePlayerMy } = require('./handlers/player');
 
 const bot = new Telegraf(config.BOT_TOKEN);
+const startupTime = new Date().toISOString();
 
 bot.use(ensureUser);
 bot.use(checkBlocked);
@@ -36,9 +41,7 @@ bot.start(handleStart);
 bot.command('apply_agent', async (ctx) => {
   return handleApplyAgent(ctx, ctx.from.id);
 });
-bot.command('ping', async (ctx) => {
-  return ctx.reply('pong 🚀');
-});
+bot.command('ping', async (ctx) => ctx.reply('pong 🚀'));
 bot.command('my', requireRole('player', 'admin', 'agent', 'promoter'), handlePlayerMy);
 
 // Admin
@@ -49,6 +52,10 @@ bot.command('list_promoters', requireRole('admin'), handleListPromoters);
 bot.command('list_players', requireRole('admin'), handleListPlayers);
 bot.command('block_agent', requireRole('admin'), handleBlockAgent);
 bot.command('block_promoter', requireRole('admin'), handleBlockPromoter);
+bot.command('block_player', requireRole('admin'), handleBlockPlayer);
+bot.command('unblock_agent', requireRole('admin'), handleUnblockAgent);
+bot.command('unblock_promoter', requireRole('admin'), handleUnblockPromoter);
+bot.command('unblock_player', requireRole('admin'), handleUnblockPlayer);
 bot.command('change_player_owner', requireRole('admin'), handleChangePlayerOwner);
 bot.command('export_players', requireRole('admin'), handleExportPlayers);
 bot.command('list_pending', requireRole('admin'), handleListPending);
@@ -60,6 +67,11 @@ bot.command('reset_player_link', requireRole('admin'), handleResetPlayerLink);
 bot.command('list_agent_applications', requireRole('admin'), handleListAgentApplications);
 bot.command('approve_agent', requireRole('admin'), handleApproveAgent);
 bot.command('reject_agent', requireRole('admin'), handleRejectAgent);
+bot.command('system_status', requireRole('admin'), handleSystemStatus);
+bot.command('audit_recent', requireRole('admin'), handleAuditRecent);
+bot.command('find_player', requireRole('admin'), handleFindPlayer);
+bot.command('find_promoter', requireRole('admin'), handleFindPromoter);
+bot.command('find_agent', requireRole('admin'), handleFindAgent);
 
 // Agent
 bot.command('agent', requireRole('agent'), handleAgent);
@@ -92,7 +104,7 @@ bot.command('share', requireRole('promoter'), handleShare);
 // Player
 bot.command('submit', requireRole('player', 'admin', 'agent', 'promoter'), handleSubmit);
 
-// Session middleware — intercept messages when user is in a step-by-step flow
+// Session middleware
 const session = require('./services/session');
 const { handleSessionMessage, handleSessionCallback } = require('./handlers/session');
 
@@ -106,8 +118,8 @@ bot.use(async (ctx, next) => {
     try {
       return await handleSessionMessage(ctx, s);
     } catch (e) {
-      console.error('[SESSION ERROR]', e.message, e.stack);
-      return ctx.reply('Session error: ' + e.message).catch(() => {});
+      console.error('[SESSION ERROR]', e.message);
+      return ctx.reply('Session error. Please try again.').catch(() => {});
     }
   }
   return next();
@@ -118,7 +130,7 @@ bot.command('cancel', async (ctx) => {
   const uid = ctx.from.id;
   if (session.has(uid)) {
     session.delete(uid);
-    return ctx.reply('Cancelled.');
+    return ctx.reply('Cancelled. Send the command again to restart.');
   }
   return ctx.reply('No active session to cancel.');
 });
@@ -129,31 +141,74 @@ bot.command('help', async (ctx) => {
   const isAdmin = config.ADMIN_IDS.includes(ctx.from.id);
   let text = '';
   if (isAdmin) {
-    text = '<b>Admin Commands:</b>\n/admin /add_agent /list_agents /list_promoters /list_players\n/list_agent_applications /approve_agent /reject_agent\n/block_agent /block_promoter /change_player_owner\n/export_players /list_pending /approve_game /reject_game\n/relink_agent /reset_agent_link /reset_player_link\n';
+    text = '<b>Admin:</b> /admin /system_status /audit_recent\n/find_player /find_promoter /find_agent\n/add_agent /list_agents /list_promoters /list_players\n/list_agent_applications /approve_agent /reject_agent\n/block_agent /block_promoter /block_player\n/unblock_agent /unblock_promoter /unblock_player\n/change_player_owner /export_players\n/list_pending /approve_game /reject_game\n';
   }
   if (user.role === 'agent') {
-    text += '\n<b>Agent Commands:</b>\n/agent /add_promoter /list_my_promoters /list_my_players\n/set_agent_link /my_agent_link /relink_pm /export_my_players\n/update_promoter_link &lt;code&gt; &lt;link&gt; — Update promoter link\n';
+    text += '\n<b>Agent:</b> /agent /add_promoter /update_promoter_link\n/list_my_promoters /list_my_players /export_my_players\n/set_agent_link /my_agent_link /relink_pm\n';
   }
   if (user.role === 'promoter') {
-    text += '\n<b>Promoter Commands:</b>\n/promoter — View panel\n/my_link — View your link\n/share — Get sharing message\n/my_players — View summary\n/my_today — View today stats\n';
+    text += '\n<b>Promoter:</b> /promoter /my_link /share /my_players /my_today\n';
   }
-  text += '\n<b>Player Commands:</b>\n/submit /my\n';
-  text += '\n<b>General:</b>\n/start apply_agent — Apply to become an Agent\n/cancel — Cancel current action';
+  text += '\n<b>Player:</b> /submit /my\n';
+  text += '\n<b>General:</b> /start apply_agent /cancel /help';
   return ctx.reply(text, { parse_mode: 'HTML' });
 });
 
-// Callback handler for Confirm/Cancel inline buttons
+// ── Callback Handler ──
+
+// Whitelist enforcement for cmd: callbacks
+function isCallbackCommandAllowed(role, cmd) {
+  // Block high-risk commands
+  if (config.CALLBACK_BLOCKED_COMMANDS.includes(cmd)) return false;
+  // Check role whitelist
+  const whitelist = config.CALLBACK_COMMAND_WHITELIST[role];
+  if (!whitelist) return false;
+  return whitelist.includes(cmd);
+}
+
 bot.on('callback_query', async (ctx) => {
   const data = ctx.callbackQuery?.data;
   if (!data) return;
+  const uid = ctx.callbackQuery.from.id;
+
   if (data === 'session_confirm' || data === 'session_cancel') {
     return handleSessionCallback(ctx);
   }
-  // Command buttons: cmd:/agent → route to handler
+
+  // Command buttons: cmd:/agent → whitelist verification + re-auth
   if (data.startsWith('cmd:')) {
     const cmd = data.slice(4);
+    // Re-read user from DB for fresh role/status
+    const db = require('./db');
+    const user = await db.query('SELECT role, status FROM users WHERE telegram_id = $1', [uid]).then(r => r.rows[0]).catch(() => null);
+    if (!user) {
+      await ctx.answerCbQuery('User not found').catch(() => {});
+      return;
+    }
+    if (user.status === 'blocked') {
+      await ctx.answerCbQuery('Account blocked').catch(() => {});
+      return;
+    }
+    // Check approval_status for agents
+    if (user.role === 'agent') {
+      const ag = await db.query('SELECT approval_status FROM agents WHERE telegram_id = $1', [uid]).then(r => r.rows[0]).catch(() => null);
+      if (ag?.approval_status === 'pending') {
+        await ctx.answerCbQuery('Application pending review').catch(() => {});
+        return;
+      }
+      if (ag?.approval_status === 'rejected') {
+        await ctx.answerCbQuery('Application rejected').catch(() => {});
+        return;
+      }
+    }
+    // Whitelist check
+    if (!isCallbackCommandAllowed(user.role, cmd)) {
+      await require('./services/audit').log(uid, user.role, 'callback_blocked', null, cmd);
+      await ctx.answerCbQuery('Permission denied').catch(() => {});
+      return;
+    }
     await ctx.answerCbQuery().catch(() => {});
-    // Build a synthetic ctx with message properties from callback
+    // Route via handleUpdate
     const fakeMsg = {
       message_id: ctx.callbackQuery.message.message_id,
       from: ctx.callbackQuery.from,
@@ -162,36 +217,33 @@ bot.on('callback_query', async (ctx) => {
       text: cmd,
       entities: [{ type: 'bot_command', offset: 0, length: cmd.length }]
     };
-    const fakeCtx = {
-      ...ctx,
-      message: fakeMsg,
-      updateType: 'message',
-      update: { message: fakeMsg },
-      callbackQuery: undefined,
-    };
-    // Re-run through middleware chain (ensureUser already ran)
     return bot.handleUpdate({ update_id: Date.now(), message: fakeMsg });
   }
-  // Inline approve/reject agent buttons
-  if (data.startsWith('approve_agent_')) {
-    const code = data.replace('approve_agent_', '');
-    if (!config.ADMIN_IDS.includes(ctx.callbackQuery.from.id)) {
+
+  // Inline approve/reject agent buttons — re-verify admin
+  if (data.startsWith('approve_agent_') || data.startsWith('reject_agent_')) {
+    if (!config.ADMIN_IDS.includes(uid)) {
       await ctx.answerCbQuery('Admin only').catch(() => {});
       return;
     }
     await ctx.answerCbQuery().catch(() => {});
-    return handleApproveAgentCb(ctx, code);
+    if (data.startsWith('approve_agent_')) {
+      return handleApproveAgentCb(ctx, data.replace('approve_agent_', ''));
+    }
+    return handleRejectAgentCb(ctx, data.replace('reject_agent_', ''));
   }
-  if (data.startsWith('reject_agent_')) {
-    const code = data.replace('reject_agent_', '');
-    if (!config.ADMIN_IDS.includes(ctx.callbackQuery.from.id)) {
+
+  // Admin panel buttons
+  if (data.startsWith('admin_panel_')) {
+    if (!config.ADMIN_IDS.includes(uid)) {
       await ctx.answerCbQuery('Admin only').catch(() => {});
       return;
     }
     await ctx.answerCbQuery().catch(() => {});
-    return handleRejectAgentCb(ctx, code);
+    return handleAdminPanelButtons(ctx, data);
   }
-  // Pass through to existing callback handlers
+
+  // Players pagination
   if (data.startsWith('players_')) {
     const parts = data.split('_', 3);
     if (parts.length >= 3) {
@@ -199,6 +251,7 @@ bot.on('callback_query', async (ctx) => {
       await handleListMyPlayers({ chat: ctx.callbackQuery.message.chat, from: ctx.callbackQuery.from }, parseInt(parts[2]));
     }
   }
+
   await ctx.answerCbQuery().catch(() => {});
 });
 
@@ -208,7 +261,7 @@ bot.catch((err, ctx) => {
   ctx.reply('System error, please try again later.').catch(() => {});
 });
 
-// Startup
+// ── Express App ──
 async function start() {
   console.log('[INIT] Connecting to database...');
   await initDB();
@@ -224,6 +277,19 @@ async function start() {
     const express = require('express');
     const app = express();
     app.use(express.json());
+
+    // /health — public, no auth, for UptimeRobot
+    app.get('/health', async (_, res) => {
+      try {
+        const { query } = require('./db');
+        await query('SELECT 1');
+        res.json({ ok: true, db: 'connected', time: new Date().toISOString(), service: 'PH90 Bonus Bot' });
+      } catch (e) {
+        res.json({ ok: false, db: 'error', time: new Date().toISOString() });
+      }
+    });
+
+    // /webhook — requires SECRET_TOKEN
     app.post('/webhook', (req, res) => {
       if (req.headers['x-telegram-bot-api-secret-token'] !== config.SECRET_TOKEN) {
         return res.status(403).json({ ok: false, error: 'unauthorized' });
@@ -233,16 +299,8 @@ async function start() {
         bot.handleUpdate(req.body).catch(err => console.error('[WEBHOOK ASYNC]', err.message));
       });
     });
+
     app.get('/', (_, res) => res.send('Bot is running 24/7 🚀'));
-    app.get('/debug', async (_, res) => {
-      try {
-        const { query } = require('./db');
-        const r = await query('SELECT NOW() as now, (SELECT COUNT(*) FROM users) as users');
-        res.json({ ok: true, db: 'connected', time: r.rows[0].now, users: r.rows[0].users });
-      } catch (e) {
-        res.json({ ok: false, db: 'error: ' + e.message });
-      }
-    });
     app.listen(config.PORT, () => console.log(`[START] Webhook server on port ${config.PORT}`));
   } else {
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });
@@ -258,3 +316,5 @@ start().catch(err => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+
+module.exports = { startupTime };

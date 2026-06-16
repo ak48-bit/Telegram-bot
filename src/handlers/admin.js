@@ -11,6 +11,7 @@ async function handleAdmin(ctx) {
       (SELECT COUNT(*) FROM agents) AS agents,
       (SELECT COUNT(*) FROM agents WHERE status = 'active') AS active_agents,
       (SELECT COUNT(*) FROM agents WHERE status = 'blocked') AS blocked_agents,
+      (SELECT COUNT(*) FROM agents WHERE approval_status = 'pending') AS pending_agents,
       (SELECT COUNT(*) FROM promoters) AS promoters,
       (SELECT COUNT(*) FROM promoters WHERE status = 'active') AS active_promoters,
       (SELECT COUNT(*) FROM promoters WHERE status = 'blocked') AS blocked_promoters,
@@ -21,27 +22,32 @@ async function handleAdmin(ctx) {
   const s = stats.rows[0];
   return ctx.reply(
     `📊 <b>Admin Dashboard</b>\n\n` +
-    `👥 <b>Agents:</b> ${s.active_agents} active / ${s.blocked_agents} blocked / ${s.agents} total\n` +
-    `👤 <b>Promoters:</b> ${s.active_promoters} active / ${s.blocked_promoters} blocked / ${s.promoters} total\n` +
-    `🎮 <b>Players:</b> ${s.players} total | 🆕 Today: ${s.today_players}\n` +
-    `⏳ <b>Pending Approvals:</b> ${s.pending_games || 0}\n\n` +
-    `<b>Commands:</b>\n` +
-    `/add_agent A001 Name — Create Agent\n` +
-    `/list_agents — View All Agents\n` +
-    `/list_promoters — View All Promoters\n` +
-    `/list_players — View All Players\n` +
-    `/block_agent A001 — Block Agent\n` +
-    `/block_promoter B001 — Block Promoter\n` +
-    `/change_player_owner TGID B001 — Change Player Owner\n` +
-    `/list_pending — Pending Game IDs\n` +
-    `/approve_game TGID — Approve\n` +
-    `/reject_game TGID — Reject\n` +
-    `/list_agent_applications — Pending Agent Applications\n` +
-    `/approve_agent Code — Approve Agent\n` +
-    `/reject_agent Code — Reject Agent\n` +
-    `/export_players — Export All Players`,
-    { parse_mode: 'HTML' }
+    `👥 Agents: ${s.active_agents} active / ${s.blocked_agents} blocked / ${s.agents} total\n` +
+    `👤 Promoters: ${s.active_promoters} active / ${s.blocked_promoters} blocked / ${s.promoters} total\n` +
+    `🎮 Players: ${s.players} total | 🆕 Today: ${s.today_players}\n` +
+    `⏳ Pending: ${s.pending_agents || 0} agent apps | ${s.pending_games || 0} game IDs\n\n` +
+    `<b>Quick Actions:</b>`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '🕓 Pending Agent Apps', callback_data: 'admin_panel_list_agent_apps' }],
+        [{ text: '👥 Agent List', callback_data: 'cmd:/list_agents' }, { text: '👤 Promoter List', callback_data: 'cmd:/list_promoters' }],
+        [{ text: '🎮 Player List', callback_data: 'cmd:/list_players' }, { text: '✅ Game ID Review', callback_data: 'cmd:/list_pending' }],
+        [{ text: '⚙️ System Status', callback_data: 'cmd:/system_status' }, { text: '🧾 Audit Log', callback_data: 'cmd:/audit_recent' }],
+        [{ text: '📤 Export Players', callback_data: 'cmd:/export_players' }],
+      ]}
+    }
   );
+}
+
+// Admin panel button handler
+async function handleAdminPanelButtons(ctx, data) {
+  switch (data) {
+    case 'admin_panel_list_agent_apps':
+      return handleListAgentApplications(ctx);
+    default:
+      return ctx.answerCbQuery('Unknown action').catch(() => {});
+  }
 }
 
 // /add_agent A001 Leo
@@ -554,12 +560,199 @@ async function handleRejectAgentCb(ctx, code) {
   ).catch(() => {});
 }
 
+// /block_player <tgid>
+async function handleBlockPlayer(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: /block_player TGID');
+  const tgId = parseInt(parts[1]);
+  if (!tgId) return ctx.reply('Invalid TG ID.');
+  await db.query("UPDATE users SET status = 'blocked' WHERE telegram_id = $1", [tgId]);
+  await audit.log(ctx.from.id, 'admin', 'block_player', 'player', String(tgId));
+  return ctx.reply(`🚫 Player ${tgId} blocked.`);
+}
+
+// /unblock_agent <code>
+async function handleUnblockAgent(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: /unblock_agent CODE');
+  const code = parts[1];
+  const ag = await db.query('SELECT telegram_id FROM agents WHERE agent_code = $1', [code]);
+  if (ag.rows.length === 0) return ctx.reply('Agent not found.');
+  await db.query("UPDATE agents SET status = 'active' WHERE agent_code = $1", [code]);
+  if (ag.rows[0].telegram_id) {
+    await db.query("UPDATE users SET status = 'active' WHERE telegram_id = $1", [ag.rows[0].telegram_id]);
+  }
+  await audit.log(ctx.from.id, 'admin', 'unblock_agent', 'agent', code);
+  return ctx.reply(`✅ Agent ${code} unblocked.`);
+}
+
+// /unblock_promoter <code>
+async function handleUnblockPromoter(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: /unblock_promoter CODE');
+  const code = parts[1];
+  const pm = await db.query('SELECT telegram_id FROM promoters WHERE promoter_code = $1', [code]);
+  if (pm.rows.length === 0) return ctx.reply('Promoter not found.');
+  await db.query("UPDATE promoters SET status = 'active' WHERE promoter_code = $1", [code]);
+  if (pm.rows[0].telegram_id) {
+    await db.query("UPDATE users SET status = 'active' WHERE telegram_id = $1", [pm.rows[0].telegram_id]);
+  }
+  await audit.log(ctx.from.id, 'admin', 'unblock_promoter', 'promoter', code);
+  return ctx.reply(`✅ Promoter ${code} unblocked.`);
+}
+
+// /unblock_player <tgid>
+async function handleUnblockPlayer(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: /unblock_player TGID');
+  const tgId = parseInt(parts[1]);
+  if (!tgId) return ctx.reply('Invalid TG ID.');
+  await db.query("UPDATE users SET status = 'active' WHERE telegram_id = $1", [tgId]);
+  await audit.log(ctx.from.id, 'admin', 'unblock_player', 'player', String(tgId));
+  return ctx.reply(`✅ Player ${tgId} unblocked.`);
+}
+
+// /system_status
+async function handleSystemStatus(ctx) {
+  const startupTime = require('../index').startupTime || 'unknown';
+  let dbStatus = 'connected';
+  try { await db.query('SELECT 1'); } catch (e) { dbStatus = 'error: ' + e.message; }
+  const stats = await db.query(`
+    SELECT
+      (SELECT COUNT(*) FROM agents) AS agents,
+      (SELECT COUNT(*) FROM agents WHERE approval_status = 'pending') AS pending_agents,
+      (SELECT COUNT(*) FROM promoters) AS promoters,
+      (SELECT COUNT(*) FROM players) AS players,
+      (SELECT COUNT(*) FROM players WHERE game_id_status = 'pending') AS pending_games
+  `);
+  const s = stats.rows[0];
+  return ctx.reply(
+    `⚙️ <b>System Status</b>\n\n` +
+    `🟢 Bot: Running\n` +
+    `🗄️ DB: ${dbStatus}\n` +
+    `🕐 Time: ${new Date().toISOString().replace('T', ' ').slice(0, 19)}\n` +
+    `🚀 Started: ${startupTime.replace('T', ' ').slice(0, 19)}\n\n` +
+    `👥 Agents: ${s.agents} (${s.pending_agents} pending)\n` +
+    `👤 Promoters: ${s.promoters}\n` +
+    `🎮 Players: ${s.players} (${s.pending_games} pending games)`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+// /audit_recent
+async function handleAuditRecent(ctx) {
+  await audit.log(ctx.from.id, 'admin', 'audit_recent', null, null);
+  const logs = await db.query(
+    `SELECT created_at, actor_telegram_id, actor_role, action, target_type, target_id
+     FROM audit_logs ORDER BY created_at DESC LIMIT 20`
+  );
+  if (logs.rows.length === 0) return ctx.reply('No audit logs.');
+  const lines = ['<b>🧾 Recent Audit Logs</b>\n'];
+  for (const r of logs.rows) {
+    const ts = r.created_at ? new Date(r.created_at).toISOString().replace('T', ' ').slice(0, 19) : '-';
+    lines.push(`<i>${ts}</i> | <code>${r.actor_telegram_id}</code> | ${r.actor_role} | ${r.action} | ${r.target_type || '-'}:${r.target_id || '-'}`);
+  }
+  return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+}
+
+// /find_player <tgid_or_gameid>
+async function handleFindPlayer(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: /find_player TGID_or_GameID');
+  const query1 = parts[1];
+  const isNum = /^\d+$/.test(query1);
+  let player;
+  if (isNum) {
+    player = await db.query(
+      `SELECT p.*, pm.promoter_code, pm.name AS promoter_name, a.agent_code, a.name AS agent_name, u.username
+       FROM players p LEFT JOIN promoters pm ON p.promoter_id = pm.id LEFT JOIN agents a ON p.agent_id = a.id LEFT JOIN users u ON p.telegram_id = u.telegram_id
+       WHERE p.telegram_id = $1`, [parseInt(query1)]
+    );
+  }
+  if (!player || player.rows.length === 0) {
+    player = await db.query(
+      `SELECT p.*, pm.promoter_code, pm.name AS promoter_name, a.agent_code, a.name AS agent_name, u.username
+       FROM players p LEFT JOIN promoters pm ON p.promoter_id = pm.id LEFT JOIN agents a ON p.agent_id = a.id LEFT JOIN users u ON p.telegram_id = u.telegram_id
+       WHERE UPPER(p.game_id) = $1`, [query1.toUpperCase()]
+    );
+  }
+  if (player.rows.length === 0) return ctx.reply('Player not found.');
+  const p = player.rows[0];
+  return ctx.reply(
+    `🔍 <b>Player Found</b>\n\n` +
+    `TG ID: <code>${p.telegram_id}</code>\n` +
+    `Username: @${p.username || '-'}\n` +
+    `Game ID: <code>${p.game_id || '-'}</code>\n` +
+    `Status: ${p.game_id_status || '-'}\n` +
+    `Promoter: ${p.promoter_code || '-'} (${p.promoter_name || '-'})\n` +
+    `Agent: ${p.agent_code || '-'} (${p.agent_name || '-'})\n` +
+    `Created: ${p.created_at ? new Date(p.created_at).toISOString().slice(0, 10) : '-'}`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+// /find_promoter <code>
+async function handleFindPromoter(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: /find_promoter CODE');
+  const code = parts[1];
+  const pm = await db.query(
+    `SELECT pm.*, a.agent_code, a.name AS agent_name,
+            (SELECT COUNT(*) FROM players WHERE promoter_id = pm.id) AS player_count,
+            (SELECT COUNT(*) FROM players WHERE promoter_id = pm.id AND created_at::date = CURRENT_DATE) AS today_count
+     FROM promoters pm LEFT JOIN agents a ON pm.agent_id = a.id WHERE pm.promoter_code = $1`, [code]
+  );
+  if (pm.rows.length === 0) return ctx.reply('Promoter not found.');
+  const p = pm.rows[0];
+  return ctx.reply(
+    `🔍 <b>Promoter Found</b>\n\n` +
+    `Code: <code>${p.promoter_code}</code>\n` +
+    `Name: ${p.name}\n` +
+    `Status: ${p.status} | Link: ${p.link_status || 'NOT_SUBMITTED'}\n` +
+    `Agent: ${p.agent_code || '-'} (${p.agent_name || '-'})\n` +
+    `TG ID: ${p.telegram_id || 'Not bound'}\n` +
+    `Players: ${p.player_count} total | 🆕 Today: ${p.today_count}\n` +
+    `Created: ${p.created_at ? new Date(p.created_at).toISOString().slice(0, 10) : '-'}`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+// /find_agent <code>
+async function handleFindAgent(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: /find_agent CODE');
+  const code = parts[1];
+  const ag = await db.query(
+    `SELECT a.*,
+            (SELECT COUNT(*) FROM promoters WHERE agent_id = a.id) AS promoter_count,
+            (SELECT COUNT(*) FROM players WHERE agent_id = a.id) AS player_count
+     FROM agents a WHERE a.agent_code = $1`, [code]
+  );
+  if (ag.rows.length === 0) return ctx.reply('Agent not found.');
+  const a = ag.rows[0];
+  return ctx.reply(
+    `🔍 <b>Agent Found</b>\n\n` +
+    `Code: <code>${a.agent_code}</code>\n` +
+    `Name: ${a.name}\n` +
+    `Status: ${a.status} | Approval: ${a.approval_status}\n` +
+    `TG ID: ${a.telegram_id || 'Not bound'}\n` +
+    `Promoters: ${a.promoter_count} | Players: ${a.player_count}\n` +
+    `Created: ${a.created_at ? new Date(a.created_at).toISOString().slice(0, 10) : '-'}\n` +
+    `Approved: ${a.approved_at ? new Date(a.approved_at).toISOString().slice(0, 10) : '-'}`,
+    { parse_mode: 'HTML' }
+  );
+}
+
 module.exports = {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
-  handleListPlayers, handleBlockAgent, handleBlockPromoter,
+  handleListPlayers, handleBlockAgent, handleBlockPromoter, handleBlockPlayer,
+  handleUnblockAgent, handleUnblockPromoter, handleUnblockPlayer,
   handleChangePlayerOwner, handleExportPlayers,
   handleListPending, handleApproveGame, handleRejectGame,
   handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
   handleListAgentApplications, handleApproveAgent, handleRejectAgent,
   handleApproveAgentCb, handleRejectAgentCb,
+  handleSystemStatus, handleAuditRecent,
+  handleFindPlayer, handleFindPromoter, handleFindAgent,
+  handleAdminPanelButtons,
 };

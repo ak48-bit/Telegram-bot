@@ -25,6 +25,38 @@ const config = {
     perHour: 5,
     perDay: 3,
   },
+
+  // Game ID submit rate limits
+  SUBMIT_RATE_LIMITS: {
+    perMinute: 3,
+    perHour: 10,
+  },
+
+  // Command button whitelist — which commands can be triggered via cmd: callback
+  CALLBACK_COMMAND_WHITELIST: {
+    admin: ['/admin', '/list_agents', '/list_promoters', '/list_players',
+            '/list_agent_applications', '/list_pending', '/export_players',
+            '/system_status', '/audit_recent', '/find_player', '/find_promoter', '/find_agent'],
+    agent: ['/agent', '/add_promoter', '/list_my_promoters', '/list_my_players',
+            '/my_agent_link', '/export_my_players', '/set_agent_link'],
+    promoter: ['/promoter', '/my_link', '/share', '/my_players', '/my_today'],
+    player: ['/my', '/submit'],
+  },
+
+  // High-risk commands NEVER allowed via cmd: callback (must use dedicated handlers with params)
+  CALLBACK_BLOCKED_COMMANDS: [
+    '/change_player_owner', '/block_agent', '/block_promoter', '/block_player',
+    '/unblock_agent', '/unblock_promoter', '/unblock_player',
+    '/reset_agent_link', '/reset_player_link', '/relink_agent', '/relink_pm',
+    '/approve_agent', '/reject_agent', '/approve_game', '/reject_game',
+    '/export_players', '/broadcast',
+  ],
+
+  // Promoter name regex (no spaces)
+  PROMOTER_NAME_REGEX: /^[A-Za-z0-9_-]{2,30}$/,
+
+  // Startup time
+  STARTUP_TIME: new Date().toISOString(),
 };
 
 module.exports = config;

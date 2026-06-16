@@ -23,8 +23,7 @@ async function ensureUser(ctx, next) {
     ).then(r => r.rows[0]);
   } catch (e) {
     console.error('[ensureUser] DB error:', e.message);
-    // Create a minimal user object so the message can still be processed
-    ctx.state.user = { telegram_id: id, username, first_name, role: 'player', status: 'active' };
+    return ctx.reply('System is temporarily unavailable. Please try again later.').catch(() => {});
   }
   return next();
 }
@@ -54,25 +53,29 @@ function requireRole(...roles) {
     // 额外：检查 agent/promoter 的 status
     if (user.role === 'agent') {
       const ag = await db.query('SELECT status, approval_status FROM agents WHERE telegram_id = $1', [user.telegram_id]);
-      if (ag.rows.length > 0) {
-        if (ag.rows[0].status === 'blocked') {
-          return ctx.reply('🚫 Your Agent account has been blocked.');
-        }
-        if (ag.rows[0].approval_status === 'pending') {
-          const audit = require('../services/audit');
-          audit.log(user.telegram_id, 'agent', 'agent_pending_access_denied', 'agent', null).catch(() => {});
-          return ctx.reply('Your Agent application is still pending review.');
-        }
-        if (ag.rows[0].approval_status === 'rejected') {
-          const audit = require('../services/audit');
-          audit.log(user.telegram_id, 'agent', 'agent_rejected_access_denied', 'agent', null).catch(() => {});
-          return ctx.reply('Your Agent application was rejected. Please contact Admin.');
-        }
+      if (ag.rows.length === 0) {
+        return ctx.reply('Agent profile not found. Please contact Admin.');
+      }
+      if (ag.rows[0].status === 'blocked') {
+        return ctx.reply('🚫 Your Agent account has been blocked.');
+      }
+      if (ag.rows[0].approval_status === 'pending') {
+        const audit = require('../services/audit');
+        audit.log(user.telegram_id, 'agent', 'agent_pending_access_denied', 'agent', null).catch(() => {});
+        return ctx.reply('Your Agent application is still pending review.');
+      }
+      if (ag.rows[0].approval_status === 'rejected') {
+        const audit = require('../services/audit');
+        audit.log(user.telegram_id, 'agent', 'agent_rejected_access_denied', 'agent', null).catch(() => {});
+        return ctx.reply('Your Agent application was rejected. Please contact Admin.');
       }
     }
     if (user.role === 'promoter') {
       const pm = await db.query('SELECT status FROM promoters WHERE telegram_id = $1', [user.telegram_id]);
-      if (pm.rows.length > 0 && pm.rows[0].status === 'blocked') {
+      if (pm.rows.length === 0) {
+        return ctx.reply('Promoter profile not found. Please contact Agent.');
+      }
+      if (pm.rows[0].status === 'blocked') {
         return ctx.reply('🚫 Your Promoter account has been blocked.');
       }
     }

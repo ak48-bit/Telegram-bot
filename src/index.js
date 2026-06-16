@@ -154,13 +154,28 @@ bot.on('callback_query', async (ctx) => {
   if (data === 'session_confirm' || data === 'session_cancel') {
     return handleSessionCallback(ctx);
   }
-  // Command buttons: cmd:/agent → simulate command
+  // Command buttons: cmd:/agent → route to handler
   if (data.startsWith('cmd:')) {
     const cmd = data.slice(4);
     await ctx.answerCbQuery().catch(() => {});
-    await ctx.deleteMessage().catch(() => {});
-    ctx.message.text = cmd;
-    return bot.handleUpdate({ message: ctx.message });
+    // Build a synthetic ctx with message properties from callback
+    const fakeMsg = {
+      message_id: ctx.callbackQuery.message.message_id,
+      from: ctx.callbackQuery.from,
+      chat: ctx.callbackQuery.message.chat,
+      date: Math.floor(Date.now() / 1000),
+      text: cmd,
+      entities: [{ type: 'bot_command', offset: 0, length: cmd.length }]
+    };
+    const fakeCtx = {
+      ...ctx,
+      message: fakeMsg,
+      updateType: 'message',
+      update: { message: fakeMsg },
+      callbackQuery: undefined,
+    };
+    // Re-run through middleware chain (ensureUser already ran)
+    return bot.handleUpdate({ update_id: Date.now(), message: fakeMsg });
   }
   // Inline approve/reject agent buttons
   if (data.startsWith('approve_agent_')) {

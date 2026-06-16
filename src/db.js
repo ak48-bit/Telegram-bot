@@ -162,6 +162,24 @@ async function initDB() {
   // Drop FK on created_by_agent_id if it references users(telegram_id) — we store agents.id now
   await query("ALTER TABLE promoters DROP CONSTRAINT IF EXISTS promoters_created_by_agent_id_fkey").catch(() => {});
   await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT");
+  await query("ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS token_hash TEXT");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_invite_tokens_hash ON invite_tokens(token_hash)");
+
+  // Sessions table for persistent step-mode flows
+  await query(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id SERIAL PRIMARY KEY,
+      telegram_id BIGINT NOT NULL,
+      flow_name TEXT NOT NULL,
+      step TEXT NOT NULL,
+      payload_json JSONB DEFAULT '{}',
+      expires_at TIMESTAMP NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_telegram ON sessions(telegram_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+  `);
 
   // Migrate old data — fail on conflict so admin can resolve manually
   const agentConflicts = await query(

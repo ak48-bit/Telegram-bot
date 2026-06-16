@@ -28,8 +28,14 @@ async function handleBindToken(ctx, payload, uid) {
   const token = payload.replace(/^(bind_agent_|bind_promoter_)/, '');
   try {
     const result = await useInviteToken(token, uid);
-    if (!result) {
-      return ctx.reply('This binding link is invalid or expired.\n\nPossible reasons:\n• Link invalid\n• Link expired\n• Link revoked\n\nContact your upline for a new link.');
+    if (!result || !result.type) {
+      if (result?.reason === 'used') {
+        return ctx.reply('⚠️ This binding link has already been used.\n\nBinding links are one-time use only.\nContact your upline for a new link.');
+      }
+      if (result?.reason === 'expired') {
+        return ctx.reply('⚠️ This binding link has expired.\n\nContact your upline for a new link.');
+      }
+      return ctx.reply('⚠️ This binding link is invalid.\n\nContact your upline for a new link.');
     }
     const { type, code } = result;
     if (type === 'agent_bind') {

@@ -12,6 +12,7 @@ const config = {
   ENABLE_LEGACY_PLAYER_LINK: (process.env.ENABLE_LEGACY_PLAYER_LINK || 'false') === 'true',
   PORT: parseInt(process.env.PORT || '5000', 10),
   TOKEN_EXPIRY_HOURS: 48,
+  INVITE_TOKEN_TTL_HOURS: 72,
 
   // Agent self-application config
   RESERVED_AGENT_CODES: [

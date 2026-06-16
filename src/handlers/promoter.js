@@ -5,6 +5,20 @@ const config = require('../config');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 
+// Ensure unique player_referral_token — generates if missing
+async function ensurePlayerReferralToken(promoterId, currentToken) {
+  if (currentToken) return currentToken;
+  const crypto = require('crypto');
+  while (true) {
+    const token = crypto.randomBytes(16).toString('hex');
+    const exists = await db.query('SELECT 1 FROM promoters WHERE player_referral_token = $1', [token]);
+    if (exists.rows.length === 0) {
+      await db.query('UPDATE promoters SET player_referral_token = $1 WHERE id = $2', [token, promoterId]);
+      return token;
+    }
+  }
+}
+
 async function handlePromoter(ctx) {
   const uid = ctx.from.id;
   const pm = await db.query(
@@ -48,13 +62,8 @@ async function handleMyLink(ctx) {
   if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
   const p = pm.rows[0];
 
-  // Ensure player_referral_token exists
-  let token = p.player_referral_token;
-  if (!token) {
-    const crypto = require('crypto');
-    token = crypto.randomBytes(16).toString('hex');
-    await db.query('UPDATE promoters SET player_referral_token = $1 WHERE id = $2', [token, p.id]);
-  }
+  // Ensure player_referral_token exists (unique)
+  const token = await ensurePlayerReferralToken(p.id, p.player_referral_token);
   const link = `https://t.me/${BOT_USERNAME}?start=p_${token}`;
 
   let msg = `📢 <b>Promoter Affiliate Link</b>\n\nPromoter Code：<code>${p.promoter_code}</code>\n`;
@@ -93,8 +102,8 @@ async function handleSetPromoCompat(ctx) {
 // /my_players
 async function handleMyPlayers(ctx) {
   const uid = ctx.from.id;
-  const pm = await db.query('SELECT id FROM promoters WHERE telegram_id = $1', [uid]);
-  if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
+  const pm = await db.query('SELECT id FROM promoters WHERE telegram_id = $1 AND status = $2', [uid, 'active']);
+  if (pm.rows.length === 0) return ctx.reply('Promoter not bound or blocked.');
   const parts = ctx.message.text.trim().split(/\s+/);
   let page = 1;
   if (parts.length >= 2) page = parseInt(parts[1]) || 1;
@@ -119,8 +128,8 @@ async function handleMyPlayers(ctx) {
 // /my_today
 async function handleMyToday(ctx) {
   const uid = ctx.from.id;
-  const pm = await db.query('SELECT id, promoter_code FROM promoters WHERE telegram_id = $1', [uid]);
-  if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
+  const pm = await db.query('SELECT id, promoter_code FROM promoters WHERE telegram_id = $1 AND status = $2', [uid, 'active']);
+  if (pm.rows.length === 0) return ctx.reply('Promoter not bound or blocked.');
   const stats = await db.query(
     `SELECT COUNT(*) AS today, COUNT(*) FILTER (WHERE game_id IS NOT NULL) AS submitted,
             COUNT(*) FILTER (WHERE game_id_status = 'approved') AS approved
@@ -152,13 +161,8 @@ async function handleShare(ctx) {
     );
   }
 
-  // Ensure player_referral_token
-  let token = p.player_referral_token;
-  if (!token) {
-    const crypto = require('crypto');
-    token = crypto.randomBytes(16).toString('hex');
-    await db.query('UPDATE promoters SET player_referral_token = $1 WHERE id = $2', [token, p.id]);
-  }
+  // Ensure player_referral_token exists (unique)
+  const token = await ensurePlayerReferralToken(p.id, p.player_referral_token);
   const link = `https://t.me/${BOT_USERNAME}?start=p_${token}`;
 
   let msg = `📋 <b>Promoter Sharing Message</b>\n\n  Copy the following message and send it to players：\n\n`;

@@ -24,10 +24,49 @@ async function handleSubmit(ctx) {
     return ctx.reply('Invalid Game ID format.');
   }
 
-  // Check player exists
-  const player = await db.query('SELECT * FROM players WHERE telegram_id = $1', [uid]);
+  // Rate limit: per minute
+  const rateMin = await db.query(
+    `SELECT COUNT(*) FROM rate_limits WHERE telegram_id = $1 AND attempt_type = 'submit_game_id' AND created_at > NOW() - INTERVAL '1 minute'`,
+    [uid]
+  );
+  if (parseInt(rateMin.rows[0].count) >= config.SUBMIT_RATE_LIMITS.perMinute) {
+    await audit.log(uid, 'player', 'submit_game_id_rate_limited', 'player', String(uid), { reason: 'per_minute' });
+    return ctx.reply('Too many submissions. Please try again later.');
+  }
+  // Rate limit: per hour
+  const rateHour = await db.query(
+    `SELECT COUNT(*) FROM rate_limits WHERE telegram_id = $1 AND attempt_type = 'submit_game_id' AND created_at > NOW() - INTERVAL '1 hour'`,
+    [uid]
+  );
+  if (parseInt(rateHour.rows[0].count) >= config.SUBMIT_RATE_LIMITS.perHour) {
+    await audit.log(uid, 'player', 'submit_game_id_rate_limited', 'player', String(uid), { reason: 'per_hour' });
+    return ctx.reply('Too many submissions. Please try again later.');
+  }
+  await db.query(`INSERT INTO rate_limits (telegram_id, attempt_type) VALUES ($1, 'submit_game_id')`, [uid]);
+
+  // Check player exists and get chain status
+  const player = await db.query(
+    `SELECT p.*, pm.status AS pm_status, a.status AS ag_status
+     FROM players p
+     LEFT JOIN promoters pm ON p.promoter_id = pm.id
+     LEFT JOIN agents a ON p.agent_id = a.id
+     WHERE p.telegram_id = $1`, [uid]
+  );
   if (player.rows.length === 0) {
     return ctx.reply('Please enter through a valid Bot Share Link first.');
+  }
+  const p = player.rows[0];
+
+  // Check referral chain not blocked
+  if (p.pm_status === 'blocked' || p.ag_status === 'blocked') {
+    await audit.log(uid, 'player', 'submit_game_id_blocked_line', 'player', String(uid));
+    return ctx.reply('This referral line has been suspended. Please contact customer service.');
+  }
+
+  // Reject if already approved
+  if (p.game_id_status === 'approved') {
+    await audit.log(uid, 'player', 'submit_game_id_already_approved', 'player', String(uid), { game_id: gameId });
+    return ctx.reply('Your Game ID has already been approved and cannot be changed.');
   }
 
   // Check duplicate (normalized)
@@ -39,15 +78,15 @@ async function handleSubmit(ctx) {
     return ctx.reply('This Game ID has already been submitted.');
   }
 
-  // Save — auto-approved
+  // Save — pending admin review
   await db.query(
-    `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'approved', updated_at = NOW() WHERE telegram_id = $3`,
+    `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'pending', updated_at = NOW() WHERE telegram_id = $3`,
     [gameId, gameId, uid]
   );
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId });
 
   return ctx.reply(
-    `🎮 <b>Submit Game ID</b>\n\n<code>/submit ${gameId}</code>\n\n✅ Submitted Successfully\nGame ID：<code>${gameId}</code>\nStatus：Approved ✅`,
+    `🎮 <b>Submit Game ID</b>\n\n<code>/submit ${gameId}</code>\n\n✅ Submitted Successfully\nGame ID：<code>${gameId}</code>\nStatus：Pending Review ⏳\n\n<i>Please wait for Admin review.</i>`,
     { parse_mode: 'HTML' }
   );
 }

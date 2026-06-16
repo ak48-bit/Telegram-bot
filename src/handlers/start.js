@@ -26,8 +26,9 @@ async function handleStart(ctx) {
 // ═══ Token Binding ═══
 async function handleBindToken(ctx, payload, uid) {
   const token = payload.replace(/^(bind_agent_|bind_promoter_)/, '');
+  const expectedType = payload.startsWith('bind_agent_') ? 'agent_bind' : 'promoter_bind';
   try {
-    const result = await useInviteToken(token, uid);
+    const result = await useInviteToken(token, uid, expectedType);
     if (!result || !result.type) {
       if (result?.reason === 'used') {
         return ctx.reply('⚠️ This binding link has already been used.\n\nBinding links are one-time use only.\nContact your upline for a new link.');
@@ -35,12 +36,44 @@ async function handleBindToken(ctx, payload, uid) {
       if (result?.reason === 'expired') {
         return ctx.reply('⚠️ This binding link has expired.\n\nContact your upline for a new link.');
       }
+      if (result?.reason === 'type_mismatch') {
+        return ctx.reply('⚠️ This binding link is invalid.\n\nContact your upline for a new link.');
+      }
       return ctx.reply('⚠️ This binding link is invalid.\n\nContact your upline for a new link.');
     }
     const { type, code } = result;
     if (type === 'agent_bind') {
-      await db.query(`UPDATE users SET role = 'agent', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
-      await db.query(`UPDATE agents SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE agent_code = $2`, [uid, code]);
+      // Check agent record and prevent overwriting another user's binding
+      const agentRec = await db.query(
+        'SELECT id, telegram_id, status, approval_status FROM agents WHERE agent_code = $1', [code]
+      );
+      if (agentRec.rows.length === 0) {
+        return ctx.reply('Agent record not found.');
+      }
+      const boundTg = agentRec.rows[0].telegram_id ? String(agentRec.rows[0].telegram_id) : null;
+      const curTg = String(uid);
+      if (boundTg && boundTg !== curTg) {
+        await audit.log(uid, 'agent', 'agent_bind_already_bound', 'agent', code);
+        return ctx.reply('This Agent account is already bound. Contact Admin.');
+      }
+      // If already bound to this uid, show panel directly
+      if (boundTg === curTg) {
+        const { cmdButtons } = require('../services/cmdButtons');
+        return ctx.reply(
+          `👥 <b>Agent Already Bound</b>\n\nAgent Code：<code>${code}</code>`,
+          { parse_mode: 'HTML', reply_markup: cmdButtons([
+            ['/agent', '📊 Agent Panel'], ['/set_agent_link', '🔗 Set Agent Link'],
+            ['/add_promoter', '➕ Add Promoter'], ['/list_my_promoters', '👥 My Promoters'],
+            ['/list_my_players', '🎮 My Players'], ['/my_agent_link', '📋 My Link'],
+          ])}
+        );
+      }
+      const updUser = await db.query(`UPDATE users SET role = 'agent', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
+      const updAgent = await db.query(`UPDATE agents SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE agent_code = $2 AND (telegram_id IS NULL OR telegram_id = $1)`, [uid, code]);
+      if (updAgent.rowCount === 0) {
+        await audit.log(uid, 'agent', 'agent_bind_failed', 'agent', code);
+        return ctx.reply('Binding failed. Contact Admin.');
+      }
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
       const { cmdButtons } = require('../services/cmdButtons');
       return ctx.reply(
@@ -59,15 +92,36 @@ async function handleBindToken(ctx, payload, uid) {
       );
     }
     if (type === 'promoter_bind') {
-      const pm = await db.query(
-        `SELECT pm.id, pm.agent_id, a.agent_code FROM promoters pm JOIN agents a ON pm.agent_id = a.id WHERE pm.promoter_code = $1`, [code]
+      // Check promoter record and prevent overwriting another user's binding
+      const pmRec = await db.query(
+        'SELECT id, telegram_id, status, agent_id FROM promoters WHERE promoter_code = $1', [code]
       );
-      if (pm.rows.length === 0) return ctx.reply('Promoter record not found.');
+      if (pmRec.rows.length === 0) {
+        return ctx.reply('Promoter record not found.');
+      }
+      const boundPmTg = pmRec.rows[0].telegram_id ? String(pmRec.rows[0].telegram_id) : null;
+      const curPmTg = String(uid);
+      if (boundPmTg && boundPmTg !== curPmTg) {
+        await audit.log(uid, 'promoter', 'promoter_bind_already_bound', 'promoter', code);
+        return ctx.reply('This Promoter account is already bound. Contact Agent.');
+      }
+      // Get agent_code for display
+      const agInfo = await db.query('SELECT agent_code FROM agents WHERE id = $1', [pmRec.rows[0].agent_id]);
+      if (boundPmTg === curPmTg) {
+        return ctx.reply(
+          `📢 <b>Promoter Already Bound</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\nCommands：/promoter | /my_link | /my_players | /share`,
+          { parse_mode: 'HTML' }
+        );
+      }
       await db.query(`UPDATE users SET role = 'promoter', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
-      await db.query(`UPDATE promoters SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE promoter_code = $2`, [uid, code]);
+      const updPm = await db.query(`UPDATE promoters SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE promoter_code = $2 AND (telegram_id IS NULL OR telegram_id = $1)`, [uid, code]);
+      if (updPm.rowCount === 0) {
+        await audit.log(uid, 'promoter', 'promoter_bind_failed', 'promoter', code);
+        return ctx.reply('Binding failed. Contact Admin.');
+      }
       await audit.log(uid, 'promoter', 'promoter_bind', 'promoter', code);
       return ctx.reply(
-        `📢 <b>Promoter Bound Successfully!</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${pm.rows[0].agent_code}\n\nYour Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.\n\nCommands：/promoter | /my_link | /my_players | /share`,
+        `📢 <b>Promoter Bound Successfully!</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\nYour Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.\n\nCommands：/promoter | /my_link | /my_players | /share`,
         { parse_mode: 'HTML' }
       );
     }
@@ -107,6 +161,16 @@ async function handlePlayerBind(ctx, uid, promoter, payload) {
     return ctx.reply(
       `⚠️ You already have a referral source.\n\nCurrent Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\nTo change, contact customer service.`
     );
+  }
+
+  // Prevent Admin/Agent/Promoter from being downgraded to Player
+  const currentUser = await db.query('SELECT role FROM users WHERE telegram_id = $1', [uid]);
+  if (currentUser.rows.length > 0) {
+    const role = currentUser.rows[0].role;
+    if (role === 'admin' || role === 'agent' || role === 'promoter') {
+      await audit.log(uid, role, 'player_bind_denied_role', 'promoter', promoter.promoter_code);
+      return ctx.reply('This referral link is for players only.');
+    }
   }
 
   await db.query(

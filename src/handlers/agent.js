@@ -92,6 +92,13 @@ async function handleAddPromoter(ctx) {
   const name = parts[2];
   const rawLink = parts.slice(3).join('');
 
+  // Validate promoter code: 3-20 chars, A-Za-z0-9_-, no reserved words
+  const PM_CODE_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{2,19}$/;
+  const reservedCodes = config.RESERVED_AGENT_CODES.map(c => c.toLowerCase());
+  if (!PM_CODE_REGEX.test(promoterCode) || reservedCodes.includes(promoterCode.toLowerCase())) {
+    return ctx.reply('Invalid Promoter Code format.', { parse_mode: 'HTML' });
+  }
+
   // Validate name: no spaces, A-Za-z0-9_- only, 2-30 chars
   const PROMOTER_NAME_REGEX = /^[A-Za-z0-9_-]{2,30}$/;
   if (!name || !PROMOTER_NAME_REGEX.test(name)) {
@@ -122,15 +129,25 @@ async function handleAddPromoter(ctx) {
     return ctx.reply('This affiliate link has already been used.');
   }
 
+  // Generate unique player_referral_token
+  const crypto = require('crypto');
+  let playerReferralToken;
+  let tokenConflict = true;
+  while (tokenConflict) {
+    playerReferralToken = crypto.randomBytes(16).toString('hex');
+    const tokCheck = await db.query('SELECT 1 FROM promoters WHERE player_referral_token = $1', [playerReferralToken]);
+    if (tokCheck.rows.length === 0) tokenConflict = false;
+  }
+
   // Create promoter with link (link_status = BOUND)
   await db.query(
-    `INSERT INTO promoters (promoter_code, agent_id, name, created_by_agent_id, created_by_telegram_id, player_affiliate_link_original, player_affiliate_link_normalized, link_status, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,'BOUND','pending')`,
-    [promoterCode, agent.id, name, agent.id, uid, result.original, result.normalized]
+    `INSERT INTO promoters (promoter_code, agent_id, name, created_by_agent_id, created_by_telegram_id, player_affiliate_link_original, player_affiliate_link_normalized, player_referral_token, link_status, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'BOUND','pending')`,
+    [promoterCode, agent.id, name, agent.id, uid, result.original, result.normalized, playerReferralToken]
   );
 
-  const token = await createInviteToken('promoter_bind', promoterCode, uid);
-  const botLink = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
+  const bindToken = await createInviteToken('promoter_bind', promoterCode, uid);
+  const botLink = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${bindToken}`;
   await audit.log(uid, 'agent', 'agent_create_promoter_with_link', 'promoter', promoterCode, { name, link: result.normalized });
 
   return ctx.reply(
@@ -142,7 +159,7 @@ async function handleAddPromoter(ctx) {
     `Affiliate Link：${result.original}\n` +
     `Link Status：BOUND\n\n` +
     `Promoter Bot Link：\n${botLink}\n\n` +
-    `⚠️ No expiry, unlimited use.\n<i>Your Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.</i>`,
+    `⚠️ This is a one-time identity binding link.\nDo not share it in groups.\nIt becomes invalid after use.\n\n<i>Your Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.</i>`,
     { parse_mode: 'HTML' }
   );
 }
@@ -285,7 +302,7 @@ async function handleRelinkPromoter(ctx) {
   const token = await createInviteToken('promoter_bind', code, uid);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
   await audit.log(uid, 'agent', 'relink_promoter', 'promoter', code);
-  return ctx.reply(`🔗 <b>Promoter Binding Link (New)</b>\n\nCode：<code>${code}</code>\nName：${pm.rows[0].name}\n\n<code>${link}</code>\n\n⚠️ Old link invalidated. No expiry, unlimited use.`, { parse_mode: 'HTML' });
+  return ctx.reply(`🔗 <b>Promoter Binding Link (New)</b>\n\nCode：<code>${code}</code>\nName：${pm.rows[0].name}\n\n<code>${link}</code>\n\n⚠️ Old link invalidated.\n⚠️ This is a one-time identity binding link.\nDo not share it in groups.\nIt becomes invalid after use.`, { parse_mode: 'HTML' });
 }
 
 // /update_promoter_link <promoter_code> <affiliate_link>

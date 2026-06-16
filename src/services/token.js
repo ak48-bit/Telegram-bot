@@ -2,35 +2,38 @@ const crypto = require('crypto');
 const db = require('../db');
 const config = require('../config');
 
+const TTL_HOURS = config.INVITE_TOKEN_TTL_HOURS || 72;
+
 /**
- * Generate a cryptographically random token and store its SHA-256 hash.
+ * Generate a cryptographically random token. Only SHA-256 hash stored in DB.
  * @param {string} type — 'agent_bind' | 'promoter_bind'
  * @param {string} code — agent_code or promoter_code
  * @param {number} createdBy — creator telegram_id
  * @returns {string} plaintext token (for the link — never stored in DB)
  */
 async function createInviteToken(type, code, createdBy) {
-  // 32 bytes = 64 hex chars
   const token = crypto.randomBytes(32).toString('hex');
   const hash = crypto.createHash('sha256').update(token).digest('hex');
-  const expiresAt = new Date(Date.now() + 365 * 24 * 3600 * 1000); // 1 year
+  const expiresAt = new Date(Date.now() + TTL_HOURS * 3600 * 1000);
 
+  // Store only hash — plaintext token never persisted
   await db.query(
-    `INSERT INTO invite_tokens (token, token_hash, type, code, created_by, expires_at)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [token, hash, type, code, createdBy, expiresAt]
+    `INSERT INTO invite_tokens (token_hash, type, code, created_by, expires_at)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [hash, type, code, createdBy, expiresAt]
   );
 
   return token;
 }
 
 /**
- * Use a binding token — verify hash, mark as used.
+ * Use a binding token — verify hash + type, mark as used.
  * @param {string} plainToken — the raw token from the URL
  * @param {number} telegramId — user's telegram_id
- * @returns {object|null} — { type, code } or null
+ * @param {string} expectedType — 'agent_bind' | 'promoter_bind'
+ * @returns {object} — { type, code, reason } where reason is 'ok'|'used'|'expired'|'type_mismatch'|'invalid'
  */
-async function useInviteToken(plainToken, telegramId) {
+async function useInviteToken(plainToken, telegramId, expectedType) {
   const hash = crypto.createHash('sha256').update(plainToken).digest('hex');
   const client = await db.pool.connect();
   try {
@@ -38,19 +41,22 @@ async function useInviteToken(plainToken, telegramId) {
 
     const res = await client.query(
       `SELECT * FROM invite_tokens
-       WHERE token_hash = $1 AND is_used = FALSE AND expires_at > NOW()
+       WHERE token_hash = $1 AND type = $2 AND is_used = FALSE AND expires_at > NOW()
        FOR UPDATE`,
-      [hash]
+      [hash, expectedType]
     );
 
     if (res.rows.length === 0) {
-      // Check if already used (give specific message)
-      const used = await client.query(
-        `SELECT 1 FROM invite_tokens WHERE token_hash = $1 AND is_used = TRUE`, [hash]
+      // Check why: used, expired, or type mismatch
+      const check = await client.query(
+        `SELECT is_used, type, expires_at FROM invite_tokens WHERE token_hash = $1`, [hash]
       );
       await client.query('ROLLBACK');
-      if (used.rows.length > 0) return { type: null, code: null, reason: 'used' };
-      return { type: null, code: null, reason: 'expired' };
+      if (check.rows.length === 0) return { type: null, code: null, reason: 'invalid' };
+      const r = check.rows[0];
+      if (r.is_used) return { type: null, code: null, reason: 'used' };
+      if (new Date(r.expires_at) <= new Date()) return { type: null, code: null, reason: 'expired' };
+      return { type: null, code: null, reason: 'type_mismatch' };
     }
 
     const row = res.rows[0];

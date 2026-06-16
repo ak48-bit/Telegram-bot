@@ -391,7 +391,7 @@ async function stepApplyAgentName(ctx, s, text) {
 
   session.delete(uid);
 
-  // Notify all admins
+  // Notify all admins with inline approve/reject buttons
   for (const adminId of config.ADMIN_IDS) {
     try {
       await ctx.telegram.sendMessage(adminId,
@@ -399,10 +399,16 @@ async function stepApplyAgentName(ctx, s, text) {
         `Telegram ID: <code>${uid}</code>\n` +
         `Username: @${ctx.from.username || '-'}\n` +
         `Agent Code: <code>${agentCode}</code>\n` +
-        `Agent Name: ${name}\n\n` +
-        `<b>Approve:</b>\n/approve_agent ${agentCode}\n\n` +
-        `<b>Reject:</b>\n/reject_agent ${agentCode}`,
-        { parse_mode: 'HTML' }
+        `Agent Name: ${name}`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '✅ Approve', callback_data: `approve_agent_${agentCode}` },
+              { text: '❌ Reject', callback_data: `reject_agent_${agentCode}` }
+            ]]
+          }
+        }
       );
     } catch (e) {
       console.error(`[Notify Admin ${adminId}] Failed:`, e.message);

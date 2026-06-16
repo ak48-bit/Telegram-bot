@@ -12,6 +12,7 @@ const {
   handleListPending, handleApproveGame, handleRejectGame,
   handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
   handleListAgentApplications, handleApproveAgent, handleRejectAgent,
+  handleApproveAgentCb, handleRejectAgentCb,
 } = require('./handlers/admin');
 const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
@@ -142,6 +143,25 @@ bot.on('callback_query', async (ctx) => {
   if (!data) return;
   if (data === 'session_confirm' || data === 'session_cancel') {
     return handleSessionCallback(ctx);
+  }
+  // Inline approve/reject agent buttons
+  if (data.startsWith('approve_agent_')) {
+    const code = data.replace('approve_agent_', '');
+    if (!config.ADMIN_IDS.includes(ctx.callbackQuery.from.id)) {
+      await ctx.answerCbQuery('Admin only').catch(() => {});
+      return;
+    }
+    await ctx.answerCbQuery().catch(() => {});
+    return handleApproveAgentCb(ctx, code);
+  }
+  if (data.startsWith('reject_agent_')) {
+    const code = data.replace('reject_agent_', '');
+    if (!config.ADMIN_IDS.includes(ctx.callbackQuery.from.id)) {
+      await ctx.answerCbQuery('Admin only').catch(() => {});
+      return;
+    }
+    await ctx.answerCbQuery().catch(() => {});
+    return handleRejectAgentCb(ctx, code);
   }
   // Pass through to existing callback handlers
   if (data.startsWith('players_')) {

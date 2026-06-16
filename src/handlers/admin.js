@@ -471,6 +471,72 @@ async function handleRejectAgent(ctx) {
   );
 }
 
+// Callback version: admin clicks inline Approve button
+async function handleApproveAgentCb(ctx, code) {
+  const uid = ctx.callbackQuery.from.id;
+  const ag = await db.query('SELECT * FROM agents WHERE agent_code = $1', [code]);
+  if (ag.rows.length === 0) {
+    return ctx.editMessageText('Agent application not found.').catch(() => {});
+  }
+  if (ag.rows[0].approval_status !== 'pending') {
+    return ctx.editMessageText('Agent application is not pending.').catch(() => {});
+  }
+  await db.query(
+    `UPDATE agents SET approval_status = 'approved', approved_by = $1, approved_at = NOW(), updated_at = NOW() WHERE agent_code = $2`,
+    [uid, code]
+  );
+  await audit.log(uid, 'admin', 'approve_agent_application', 'agent', code);
+  // Notify applicant
+  if (ag.rows[0].telegram_id) {
+    try {
+      await ctx.telegram.sendMessage(ag.rows[0].telegram_id,
+        `✅ <b>Agent Approved.</b>\n\nAgent Code: <code>${code}</code>\n\nYou can now use:\n/agent\n/add_promoter\n/set_agent_link\n/my_agent_link`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      console.error(`[Notify ${ag.rows[0].telegram_id}] Failed:`, e.message);
+    }
+  }
+  // Edit original notification
+  return ctx.editMessageText(
+    `✅ <b>Approved</b>\n\nAgent Code: <code>${code}</code>\nName: ${ag.rows[0].name}\nApproved by: Admin`,
+    { parse_mode: 'HTML' }
+  ).catch(() => {});
+}
+
+// Callback version: admin clicks inline Reject button
+async function handleRejectAgentCb(ctx, code) {
+  const uid = ctx.callbackQuery.from.id;
+  const ag = await db.query('SELECT * FROM agents WHERE agent_code = $1', [code]);
+  if (ag.rows.length === 0) {
+    return ctx.editMessageText('Agent application not found.').catch(() => {});
+  }
+  if (ag.rows[0].approval_status !== 'pending') {
+    return ctx.editMessageText('Agent application is not pending.').catch(() => {});
+  }
+  await db.query(
+    `UPDATE agents SET approval_status = 'rejected', rejected_by = $1, rejected_at = NOW(), updated_at = NOW() WHERE agent_code = $2`,
+    [uid, code]
+  );
+  await audit.log(uid, 'admin', 'reject_agent_application', 'agent', code);
+  // Notify applicant
+  if (ag.rows[0].telegram_id) {
+    try {
+      await ctx.telegram.sendMessage(ag.rows[0].telegram_id,
+        `❌ <b>Agent Application Rejected.</b>\n\nPlease contact Admin.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (e) {
+      console.error(`[Notify ${ag.rows[0].telegram_id}] Failed:`, e.message);
+    }
+  }
+  // Edit original notification
+  return ctx.editMessageText(
+    `❌ <b>Rejected</b>\n\nAgent Code: <code>${code}</code>\nName: ${ag.rows[0].name}\nRejected by: Admin`,
+    { parse_mode: 'HTML' }
+  ).catch(() => {});
+}
+
 module.exports = {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
   handleListPlayers, handleBlockAgent, handleBlockPromoter,
@@ -478,4 +544,5 @@ module.exports = {
   handleListPending, handleApproveGame, handleRejectGame,
   handleRelinkAgent, handleResetAgentLink, handleResetPlayerLink,
   handleListAgentApplications, handleApproveAgent, handleRejectAgent,
+  handleApproveAgentCb, handleRejectAgentCb,
 };

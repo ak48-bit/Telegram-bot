@@ -120,13 +120,18 @@ const session = require('./services/session');
 const { handleSessionMessage, handleSessionCallback } = require('./handlers/session');
 
 bot.use(async (ctx, next) => {
-  if (ctx.callbackQuery) return next(); // let callback handler deal with it
+  if (ctx.callbackQuery) return next();
   if (!ctx.message || !ctx.message.text) return next();
   const uid = ctx.from?.id;
   if (!uid) return next();
   const s = session.get(uid);
   if (s) {
-    return handleSessionMessage(ctx, s);
+    try {
+      return await handleSessionMessage(ctx, s);
+    } catch (e) {
+      console.error('[SESSION ERROR]', e.message, e.stack);
+      return ctx.reply('Session error: ' + e.message).catch(() => {});
+    }
   }
   return next();
 });

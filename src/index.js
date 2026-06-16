@@ -194,6 +194,15 @@ async function start() {
       });
     });
     app.get('/', (_, res) => res.send('Bot is running 24/7 🚀'));
+    app.get('/debug', async (_, res) => {
+      try {
+        const { query } = require('./db');
+        const r = await query('SELECT NOW() as now, (SELECT COUNT(*) FROM users) as users');
+        res.json({ ok: true, db: 'connected', time: r.rows[0].now, users: r.rows[0].users });
+      } catch (e) {
+        res.json({ ok: false, db: 'error: ' + e.message });
+      }
+    });
     app.listen(config.PORT, () => console.log(`[START] Webhook server on port ${config.PORT}`));
   } else {
     await bot.telegram.deleteWebhook({ drop_pending_updates: true });

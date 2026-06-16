@@ -27,19 +27,6 @@ const { handleSubmit, handlePlayerMy } = require('./handlers/player');
 
 const bot = new Telegraf(config.BOT_TOKEN);
 
-// Bare-minimum diagnostic — catches ALL text before any middleware
-bot.use(async (ctx, next) => {
-  if (ctx.message?.text) {
-    console.log('[DIAG] msg from=' + ctx.from?.id + ' text=' + ctx.message.text.slice(0, 80));
-    try {
-      await ctx.telegram.sendMessage(ctx.chat.id, 'diag: received [' + ctx.message.text.slice(0, 30) + ']');
-    } catch (e) {
-      console.log('[DIAG] reply failed: ' + e.message);
-    }
-  }
-  return next();
-});
-
 bot.use(ensureUser);
 bot.use(checkBlocked);
 
@@ -189,16 +176,14 @@ async function start() {
     const express = require('express');
     const app = express();
     app.use(express.json());
-    app.post('/webhook', async (req, res) => {
+    app.post('/webhook', (req, res) => {
       if (req.headers['x-telegram-bot-api-secret-token'] !== config.SECRET_TOKEN) {
         return res.status(403).json({ ok: false, error: 'unauthorized' });
       }
-      try {
-        await bot.handleUpdate(req.body);
-      } catch (err) {
-        console.error('[WEBHOOK] handleUpdate error:', err.message);
-      }
       res.sendStatus(200);
+      setImmediate(() => {
+        bot.handleUpdate(req.body).catch(err => console.error('[WEBHOOK ASYNC]', err.message));
+      });
     });
     app.get('/', (_, res) => res.send('Bot is running 24/7 🚀'));
     app.get('/debug', async (_, res) => {

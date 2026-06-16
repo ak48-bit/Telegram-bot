@@ -34,7 +34,12 @@ bot.use(checkBlocked);
 // Generic
 bot.start(handleStart);
 bot.command('apply_agent', async (ctx) => {
-  return handleApplyAgent(ctx, ctx.from.id);
+  try {
+    return await handleApplyAgent(ctx, ctx.from.id);
+  } catch (e) {
+    console.error('[apply_agent]', e.message, e.stack);
+    return ctx.reply('apply_agent error: ' + e.message).catch(() => {});
+  }
 });
 bot.command('ping', async (ctx) => {
   return ctx.reply('pong 🚀 deploy=' + require('../package.json').version);

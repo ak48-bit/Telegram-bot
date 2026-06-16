@@ -35,10 +35,12 @@ bot.use(checkBlocked);
 bot.start(handleStart);
 bot.command('apply_agent', async (ctx) => {
   try {
+    // Quick test: reply first, then run full logic
+    await ctx.reply('⏳ Starting application...');
     return await handleApplyAgent(ctx, ctx.from.id);
   } catch (e) {
-    console.error('[apply_agent]', e.message, e.stack);
-    return ctx.reply('apply_agent error: ' + e.message).catch(() => {});
+    console.error('[apply_agent]', e.message);
+    return ctx.reply('Error: ' + e.message).catch(() => {});
   }
 });
 bot.command('ping', async (ctx) => {

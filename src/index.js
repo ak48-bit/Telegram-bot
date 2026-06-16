@@ -35,6 +35,9 @@ bot.start(handleStart);
 bot.command('apply_agent', async (ctx) => {
   return handleApplyAgent(ctx, ctx.from.id);
 });
+bot.command('ping', async (ctx) => {
+  return ctx.reply('pong 🚀 deploy=' + require('../package.json').version);
+});
 bot.command('my', requireRole('player', 'admin', 'agent', 'promoter'), handlePlayerMy);
 
 // Admin
@@ -131,6 +134,14 @@ bot.command('help', async (ctx) => {
   text += '\n<b>Player Commands:</b>\n/submit /my\n';
   text += '\n<b>General:</b>\n/start apply_agent — Apply to become an Agent\n/cancel — Cancel current action';
   return ctx.reply(text, { parse_mode: 'HTML' });
+});
+
+// Catch-all text handler — confirms bot is receiving messages
+bot.use(async (ctx, next) => {
+  if (ctx.message?.text && !ctx.callbackQuery) {
+    console.log('[MSG] from=' + ctx.from?.id + ' text=' + ctx.message.text.slice(0, 50));
+  }
+  return next();
 });
 
 // Callback handler for Confirm/Cancel inline buttons

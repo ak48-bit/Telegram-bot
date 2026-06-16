@@ -7,19 +7,25 @@ const config = require('../config');
 async function ensureUser(ctx, next) {
   if (!ctx.from) return next();
   const { id, username, first_name, last_name } = ctx.from;
-  await db.query(
-    `INSERT INTO users (telegram_id, username, first_name, last_name)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (telegram_id) DO UPDATE SET
-       username = COALESCE(EXCLUDED.username, users.username),
-       first_name = COALESCE(EXCLUDED.first_name, users.first_name),
-       last_name = COALESCE(EXCLUDED.last_name, users.last_name),
-       updated_at = NOW()`,
-    [id, username, first_name, last_name]
-  );
-  ctx.state.user = await db.query(
-    `SELECT * FROM users WHERE telegram_id = $1`, [id]
-  ).then(r => r.rows[0]);
+  try {
+    await db.query(
+      `INSERT INTO users (telegram_id, username, first_name, last_name)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (telegram_id) DO UPDATE SET
+         username = COALESCE(EXCLUDED.username, users.username),
+         first_name = COALESCE(EXCLUDED.first_name, users.first_name),
+         last_name = COALESCE(EXCLUDED.last_name, users.last_name),
+         updated_at = NOW()`,
+      [id, username, first_name, last_name]
+    );
+    ctx.state.user = await db.query(
+      `SELECT * FROM users WHERE telegram_id = $1`, [id]
+    ).then(r => r.rows[0]);
+  } catch (e) {
+    console.error('[ensureUser] DB error:', e.message);
+    // Create a minimal user object so the message can still be processed
+    ctx.state.user = { telegram_id: id, username, first_name, role: 'player', status: 'active' };
+  }
   return next();
 }
 

@@ -34,7 +34,8 @@ async function handleAdmin(ctx) {
         [{ text: '👥 Agent List', callback_data: 'cmd:/list_agents' }, { text: '👤 Promoter List', callback_data: 'cmd:/list_promoters' }],
         [{ text: '🎮 Player List', callback_data: 'cmd:/list_players' }, { text: '✅ Game ID Review', callback_data: 'cmd:/list_pending' }],
         [{ text: '⚙️ System Status', callback_data: 'cmd:/system_status' }, { text: '🧾 Audit Log', callback_data: 'cmd:/audit_recent' }],
-        [{ text: '📤 Export Players', callback_data: 'cmd:/export_players' }],
+        [{ text: '🔍 Query Help', callback_data: 'admin_panel_find_help' }],
+        [{ text: '📤 Export Players', callback_data: 'admin_panel_export_confirm' }],
       ]}
     }
   );
@@ -45,6 +46,32 @@ async function handleAdminPanelButtons(ctx, data) {
   switch (data) {
     case 'admin_panel_list_agent_apps':
       return handleListAgentApplications(ctx);
+    case 'admin_panel_find_help':
+      return ctx.editMessageText(
+        '🔍 <b>Query Commands</b>\n\n' +
+        '<code>/find_player &lt;TGID or Game ID&gt;</code>\n' +
+        '<code>/find_promoter &lt;Promoter Code&gt;</code>\n' +
+        '<code>/find_agent &lt;Agent Code&gt;</code>\n\n' +
+        '<b>Export:</b>\n' +
+        '<code>/export_players</code> — Export all players\n\n' +
+        '<i>Please type the command manually.</i>',
+        { parse_mode: 'HTML' }
+      ).catch(() => {});
+    case 'admin_panel_export_confirm':
+      return ctx.editMessageText(
+        '📤 <b>Confirm Export</b>\n\n' +
+        'Export all player data to CSV?\n' +
+        'This action will be logged.',
+        {
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [[
+            { text: '✅ Confirm Export', callback_data: 'admin_export_players_confirm' },
+            { text: '❌ Cancel', callback_data: 'admin_panel_cancel' }
+          ]] }
+        }
+      ).catch(() => {});
+    case 'admin_panel_cancel':
+      return ctx.editMessageText('Cancelled.').catch(() => {});
     default:
       return ctx.answerCbQuery('Unknown action').catch(() => {});
   }

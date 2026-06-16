@@ -4,7 +4,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const config = {
   BOT_TOKEN: process.env.BOT_TOKEN || '',
   DATABASE_URL: process.env.DATABASE_URL || '',
-  SECRET_TOKEN: process.env.SECRET_TOKEN || 'change_me',
+  SECRET_TOKEN: process.env.SECRET_TOKEN || '',
   RENDER_APP_URL: process.env.RENDER_APP_URL || '',
   ALLOWED_DOMAINS: (process.env.ALLOWED_DOMAINS || '').split(',').map(d => d.trim()).filter(Boolean),
   ADMIN_IDS: (process.env.ADMIN_IDS || '').split(',').map(id => parseInt(id.trim())).filter(Boolean),
@@ -35,8 +35,8 @@ const config = {
   // Command button whitelist — which commands can be triggered via cmd: callback
   CALLBACK_COMMAND_WHITELIST: {
     admin: ['/admin', '/list_agents', '/list_promoters', '/list_players',
-            '/list_agent_applications', '/list_pending', '/export_players',
-            '/system_status', '/audit_recent', '/find_player', '/find_promoter', '/find_agent'],
+            '/list_agent_applications', '/list_pending',
+            '/system_status', '/audit_recent'],
     agent: ['/agent', '/add_promoter', '/list_my_promoters', '/list_my_players',
             '/my_agent_link', '/export_my_players', '/set_agent_link'],
     promoter: ['/promoter', '/my_link', '/share', '/my_players', '/my_today'],
@@ -58,5 +58,22 @@ const config = {
   // Startup time
   STARTUP_TIME: new Date().toISOString(),
 };
+
+function validateConfig() {
+  const errors = [];
+  if (!config.BOT_TOKEN) errors.push('BOT_TOKEN is required');
+  if (!config.DATABASE_URL) errors.push('DATABASE_URL is required');
+  if (!config.SECRET_TOKEN || config.SECRET_TOKEN === 'change_me') {
+    errors.push('SECRET_TOKEN is required and cannot be the default value');
+  }
+  if (!Array.isArray(config.ADMIN_IDS) || config.ADMIN_IDS.length === 0) {
+    errors.push('ADMIN_IDS must contain at least one Telegram ID');
+  }
+  if (errors.length) {
+    throw new Error('[CONFIG ERROR] ' + errors.join('; '));
+  }
+}
+
+config.validateConfig = validateConfig;
 
 module.exports = config;

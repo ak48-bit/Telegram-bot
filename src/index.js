@@ -42,7 +42,13 @@ bot.command('apply_agent', async (ctx) => {
   return handleApplyAgent(ctx, ctx.from.id);
 });
 bot.command('ping', async (ctx) => ctx.reply('pong 🚀'));
-bot.command('my', requireRole('player', 'admin', 'agent', 'promoter'), handlePlayerMy);
+bot.command('my', requireRole('player', 'admin', 'agent', 'promoter'), async (ctx) => {
+  const role = ctx.state.user?.role;
+  if (role === 'admin') return handleAdmin(ctx);
+  if (role === 'agent') return handleAgent(ctx);
+  if (role === 'promoter') return handlePromoter(ctx);
+  return handlePlayerMy(ctx);
+});
 
 // Admin
 bot.command('admin', requireRole('admin'), handleAdmin);
@@ -101,8 +107,8 @@ bot.command('my_today', requireRole('promoter'), handleMyToday);
 bot.command('set_player_link', requireRole('promoter'), handleSetPlayerLink);
 bot.command('share', requireRole('promoter'), handleShare);
 
-// Player
-bot.command('submit', requireRole('player', 'admin', 'agent', 'promoter'), handleSubmit);
+// Player — /submit only for players
+bot.command('submit', requireRole('player'), handleSubmit);
 
 // Session middleware
 const session = require('./services/session');
@@ -111,6 +117,10 @@ const { handleSessionMessage, handleSessionCallback } = require('./handlers/sess
 bot.use(async (ctx, next) => {
   if (ctx.callbackQuery) return next();
   if (!ctx.message || !ctx.message.text) return next();
+  // Always pass /cancel through to the command handler
+  if (ctx.message.text === '/cancel' || ctx.message.text.startsWith('/cancel ')) {
+    return next();
+  }
   const uid = ctx.from?.id;
   if (!uid) return next();
   const s = session.get(uid);
@@ -243,13 +253,45 @@ bot.on('callback_query', async (ctx) => {
     return handleAdminPanelButtons(ctx, data);
   }
 
-  // Players pagination
-  if (data.startsWith('players_')) {
-    const parts = data.split('_', 3);
-    if (parts.length >= 3) {
-      const { handleListMyPlayers } = require('./handlers/agent');
-      await handleListMyPlayers({ chat: ctx.callbackQuery.message.chat, from: ctx.callbackQuery.from }, parseInt(parts[2]));
+  // Export confirmation
+  if (data === 'admin_export_players_confirm') {
+    if (!config.ADMIN_IDS.includes(uid)) {
+      await ctx.answerCbQuery('Admin only').catch(() => {});
+      return;
     }
+    await ctx.answerCbQuery().catch(() => {});
+    return handleExportPlayers(ctx);
+  }
+
+  // Players pagination — secure re-auth required
+  if (data.startsWith('players_')) {
+    const db = require('./db');
+    const auditSvc = require('./services/audit');
+
+    const user = await db.query(
+      'SELECT role, status FROM users WHERE telegram_id = $1', [uid]
+    ).then(r => r.rows[0]).catch(() => null);
+
+    if (!user || user.role !== 'agent' || user.status !== 'active') {
+      await auditSvc.log(uid, user?.role || 'unknown', 'callback_blocked', 'players', data);
+      await ctx.answerCbQuery('Permission denied').catch(() => {});
+      return;
+    }
+
+    const agent = await db.query(
+      'SELECT approval_status, status FROM agents WHERE telegram_id = $1', [uid]
+    ).then(r => r.rows[0]).catch(() => null);
+
+    if (!agent || agent.status !== 'active' || agent.approval_status !== 'approved') {
+      await auditSvc.log(uid, user.role, 'callback_blocked', 'players', data);
+      await ctx.answerCbQuery('Agent not active').catch(() => {});
+      return;
+    }
+
+    const parts = data.split('_', 3);
+    const page = parseInt(parts[2]) || 1;
+    const { handleListMyPlayers } = require('./handlers/agent');
+    return handleListMyPlayers(ctx, page);
   }
 
   await ctx.answerCbQuery().catch(() => {});
@@ -263,6 +305,8 @@ bot.catch((err, ctx) => {
 
 // ── Express App ──
 async function start() {
+  config.validateConfig();
+  console.log('[INIT] Config validated.');
   console.log('[INIT] Connecting to database...');
   await initDB();
 
@@ -276,7 +320,7 @@ async function start() {
 
     const express = require('express');
     const app = express();
-    app.use(express.json());
+    app.use(express.json({ limit: '1mb' }));
 
     // /health — public, no auth, for UptimeRobot
     app.get('/health', async (_, res) => {

@@ -121,8 +121,8 @@ async function handleAddAgent(ctx) {
     `📋 Agent Bot Link：\n` +
     `${link}\n` +
     `━━━━━━━━━━━━━━━\n\n` +
-    `⚠️ No expiry, unlimited use\n\n` +
-    `<i>After binding, Agent must use /set_promo to submit their Affiliate Link.</i>`,
+    `⚠️ This identity binding link is valid for 72 hours and can only be used once.\nDo not share it in groups.\n\n` +
+    `<i>After binding, use /set_agent_link to submit your Agent Affiliate Link.</i>`,
     { parse_mode: 'HTML' }
   );
 }
@@ -350,7 +350,7 @@ async function handleRelinkAgent(ctx) {
   const token = await createInviteToken('agent_bind', code, ctx.from.id);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
   await audit.log(ctx.from.id, 'admin', 'relink_agent', 'agent', code);
-  return ctx.reply(`🔗 <b>Agent Binding Link (New)</b>\n\nCode：<code>${code}</code>\n\n<code>${link}</code>\n\n⚠️ Old link invalidated. No expiry, unlimited use.`, { parse_mode: 'HTML' });
+  return ctx.reply(`🔗 <b>Agent Binding Link (New)</b>\n\nCode：<code>${code}</code>\n\n<code>${link}</code>\n\n⚠️ Old link invalidated.\n⚠️ Valid for 72 hours, one-time use only.\nDo not share in groups.`, { parse_mode: 'HTML' });
 }
 
 // /reset_agent_link AgentCode
@@ -374,7 +374,7 @@ async function handleResetPlayerLink(ctx) {
   if (pm.rows.length === 0) return ctx.reply(`Promoter <code>${code}</code> not found.`, { parse_mode: 'HTML' });
   await db.query(`UPDATE promoters SET player_affiliate_link_original = NULL, player_affiliate_link_normalized = NULL, link_status = 'NOT_SUBMITTED', updated_at = NOW() WHERE promoter_code = $1`, [code]);
   await audit.log(ctx.from.id, 'admin', 'reset_player_link', 'promoter', code);
-  return ctx.reply(`✅ Promoter <code>${code}</code> link reset to NOT_SUBMITTED. Promoter can re-submit with /set_player_link.`, { parse_mode: 'HTML' });
+  return ctx.reply(`✅ Promoter <code>${code}</code> link reset to NOT_SUBMITTED. Agent should use /update_promoter_link to set a new link.`, { parse_mode: 'HTML' });
 }
 
 // /list_agent_applications

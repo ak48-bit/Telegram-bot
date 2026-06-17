@@ -165,14 +165,15 @@ async function handleShare(ctx) {
   const token = await ensurePlayerReferralToken(p.id, p.player_referral_token);
   const link = `https://t.me/${BOT_USERNAME}?start=p_${token}`;
 
-  let msg = `📋 <b>Promoter Sharing Message</b>\n\n  Copy the following message and send it to players：\n\n`;
-  msg += `  🎰 Share + Signup Reward\n`;
+  let msg = `📋 <b>Promoter Sharing Message</b>\n\n  Copy and send to players：\n\n`;
+  msg += `  🎮 Register & Join\n`;
   msg += `  ━━━━━━━━━━━━━━━\n`;
-  msg += `  Promoter Affiliate Link：\n  ${p.player_affiliate_link_original}\n\n`;
-  msg += `  📋 Promoter Bot Link：\n  ${link}\n`;
+  msg += `  Game Registration Link：\n  ${p.player_affiliate_link_original}\n\n`;
+  msg += `  📋 Bot Entry Link：\n  ${link}\n`;
   msg += `  ━━━━━━━━━━━━━━━\n`;
-  msg += `  💰 Register and Get a Bonus | Share and Get Extra Rewards\n`;
-  msg += `  📢 Forward to your friends and claim together`;
+  msg += `  📱 Register via the game link above\n`;
+  msg += `  🤖 Then open the Bot link to submit your Game ID\n`;
+  msg += `  📢 Share with friends — rewards claimed in-game`;
   return ctx.reply(msg, { parse_mode: 'HTML' });
 }
 

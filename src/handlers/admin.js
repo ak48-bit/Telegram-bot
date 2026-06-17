@@ -309,32 +309,34 @@ async function handleListPending(ctx) {
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
-// /approve_game 1259096820
+// /approve_game 1259096820 — only pending → approved
 async function handleApproveGame(ctx) {
   const parts = ctx.message.text.trim().split(/\s+/);
   if (parts.length < 2) return ctx.reply('Format: <code>/approve_game TGID</code>', { parse_mode: 'HTML' });
   const tgId = parseInt(parts[1]);
   if (!tgId) return ctx.reply('Invalid Telegram ID.');
   const res = await db.query(
-    `UPDATE players SET game_id_status = 'approved', updated_at = NOW() WHERE telegram_id = $1 AND game_id IS NOT NULL`,
+    `UPDATE players SET game_id_status = 'approved', updated_at = NOW()
+     WHERE telegram_id = $1 AND game_id IS NOT NULL AND game_id_status = 'pending'`,
     [tgId]
   );
-  if (res.rowCount === 0) return ctx.reply(`Player not found <code>${tgId}</code> 或Not submitted Game ID。`, { parse_mode: 'HTML' });
+  if (res.rowCount === 0) return ctx.reply(`Player not found or Game ID is not pending.`, { parse_mode: 'HTML' });
   await audit.log(ctx.from.id, 'admin', 'approve_game', 'player', String(tgId));
   return ctx.reply(`✅ Review Approved`, { parse_mode: 'HTML' });
 }
 
-// /reject_game 1259096820
+// /reject_game 1259096820 — only pending → rejected
 async function handleRejectGame(ctx) {
   const parts = ctx.message.text.trim().split(/\s+/);
   if (parts.length < 2) return ctx.reply('Format: <code>/reject_game TGID</code>', { parse_mode: 'HTML' });
   const tgId = parseInt(parts[1]);
   if (!tgId) return ctx.reply('Invalid Telegram ID.');
   const res = await db.query(
-    `UPDATE players SET game_id_status = 'rejected', updated_at = NOW() WHERE telegram_id = $1 AND game_id IS NOT NULL`,
+    `UPDATE players SET game_id_status = 'rejected', updated_at = NOW()
+     WHERE telegram_id = $1 AND game_id IS NOT NULL AND game_id_status = 'pending'`,
     [tgId]
   );
-  if (res.rowCount === 0) return ctx.reply(`Player not found <code>${tgId}</code> 或Not submitted Game ID。`, { parse_mode: 'HTML' });
+  if (res.rowCount === 0) return ctx.reply(`Player not found or Game ID is not pending.`, { parse_mode: 'HTML' });
   await audit.log(ctx.from.id, 'admin', 'reject_game', 'player', String(tgId));
   return ctx.reply(`❌ Rejected`, { parse_mode: 'HTML' });
 }

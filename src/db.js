@@ -84,7 +84,7 @@ async function initDB() {
       agent_id INTEGER REFERENCES agents(id),
       game_id TEXT,
       game_id_normalized TEXT,
-      game_id_status TEXT DEFAULT 'approved' CHECK (game_id_status IN ('pending','approved','rejected')),
+      game_id_status TEXT DEFAULT 'submitted' CHECK (game_id_status IN ('submitted','pending','approved','rejected')),
       first_start_payload TEXT,
       created_at TIMESTAMP DEFAULT NOW(),
       updated_at TIMESTAMP DEFAULT NOW()

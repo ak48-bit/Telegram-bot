@@ -25,14 +25,14 @@ async function handleAdmin(ctx) {
     `👥 Agents: ${s.active_agents} active / ${s.blocked_agents} blocked / ${s.agents} total\n` +
     `👤 Promoters: ${s.active_promoters} active / ${s.blocked_promoters} blocked / ${s.promoters} total\n` +
     `🎮 Players: ${s.players} total | 🆕 Today: ${s.today_players}\n` +
-    `⏳ Pending: ${s.pending_agents || 0} agent apps | ${s.pending_games || 0} game IDs\n\n` +
+    `⏳ Pending: ${s.pending_agents || 0} agent apps | 🎮 Submitted Game IDs: ${s.pending_games || 0}\n\n` +
     `<b>Quick Actions:</b>`,
     {
       parse_mode: 'HTML',
       reply_markup: { inline_keyboard: [
         [{ text: '🕓 Pending Agent Apps', callback_data: 'admin_panel_list_agent_apps' }],
         [{ text: '👥 Agent List', callback_data: 'cmd:/list_agents' }, { text: '👤 Promoter List', callback_data: 'cmd:/list_promoters' }],
-        [{ text: '🎮 Player List', callback_data: 'cmd:/list_players' }, { text: '✅ Game ID Review', callback_data: 'cmd:/list_pending' }],
+        [{ text: '🎮 Player List', callback_data: 'cmd:/list_players' }, { text: '🎮 Submitted Game IDs', callback_data: 'cmd:/list_pending' }],
         [{ text: '⚙️ System Status', callback_data: 'cmd:/system_status' }, { text: '🧾 Audit Log', callback_data: 'cmd:/audit_recent' }],
         [{ text: '🔍 Query Help', callback_data: 'admin_panel_find_help' }],
         [{ text: '📤 Export Players', callback_data: 'admin_panel_export_confirm' }],
@@ -288,57 +288,36 @@ async function handleExportPlayers(ctx) {
   }
 }
 
-// /list_pending — 查看待审核的 Game ID
+// /list_pending — deprecated: Game ID review is disabled
 async function handleListPending(ctx) {
+  // Show submitted Game IDs for record only (no review needed)
   const res = await db.query(
     `SELECT p.telegram_id, u.username, p.game_id, pm.promoter_code, pm.name AS promoter_name,
-            a.agent_code, p.created_at
+            a.agent_code, p.game_id_status, p.created_at
      FROM players p
      LEFT JOIN promoters pm ON p.promoter_id = pm.id
      LEFT JOIN agents a ON p.agent_id = a.id
      LEFT JOIN users u ON p.telegram_id = u.telegram_id
-     WHERE p.game_id IS NOT NULL AND p.game_id_status = 'pending'
+     WHERE p.game_id IS NOT NULL
      ORDER BY p.created_at DESC LIMIT 30`
   );
-  if (res.rows.length === 0) return ctx.reply('✅ No pending Game IDs.');
-  const lines = ['<b>⏳ Pending Review：</b>\n'];
+  if (res.rows.length === 0) return ctx.reply('No Game IDs submitted yet.');
+  const lines = ['🎮 <b>Submitted Game IDs (record only)</b>\n'];
   for (const r of res.rows) {
-    lines.push(`Telegram：@${r.username || '-'}\nTelegram ID：<code>${r.telegram_id}</code>\nGame ID：<code>${r.game_id}</code>\n`);
+    lines.push(`TG: <code>${r.telegram_id}</code> | Game ID: <code>${r.game_id}</code> | ${r.game_id_status}`);
   }
-  lines.push(`<code>/approve_game TGID</code>\n✅ Review Approved\n\n<code>/reject_game TGID</code>\n❌ Rejected`);
+  lines.push('\n<i>Game ID review is disabled. Submitted Game IDs are for record only.</i>');
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
 
-// /approve_game 1259096820 — only pending → approved
+// /approve_game — deprecated: Game ID review is disabled
 async function handleApproveGame(ctx) {
-  const parts = ctx.message.text.trim().split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/approve_game TGID</code>', { parse_mode: 'HTML' });
-  const tgId = parseInt(parts[1]);
-  if (!tgId) return ctx.reply('Invalid Telegram ID.');
-  const res = await db.query(
-    `UPDATE players SET game_id_status = 'approved', updated_at = NOW()
-     WHERE telegram_id = $1 AND game_id IS NOT NULL AND game_id_status = 'pending'`,
-    [tgId]
-  );
-  if (res.rowCount === 0) return ctx.reply(`Player not found or Game ID is not pending.`, { parse_mode: 'HTML' });
-  await audit.log(ctx.from.id, 'admin', 'approve_game', 'player', String(tgId));
-  return ctx.reply(`✅ Review Approved`, { parse_mode: 'HTML' });
+  return ctx.reply('Game ID review is disabled.\nSubmitted Game IDs are for record only.\nUse /list_players or /export_players to view submitted Game IDs.', { parse_mode: 'HTML' });
 }
 
-// /reject_game 1259096820 — only pending → rejected
+// /reject_game — deprecated: Game ID review is disabled
 async function handleRejectGame(ctx) {
-  const parts = ctx.message.text.trim().split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/reject_game TGID</code>', { parse_mode: 'HTML' });
-  const tgId = parseInt(parts[1]);
-  if (!tgId) return ctx.reply('Invalid Telegram ID.');
-  const res = await db.query(
-    `UPDATE players SET game_id_status = 'rejected', updated_at = NOW()
-     WHERE telegram_id = $1 AND game_id IS NOT NULL AND game_id_status = 'pending'`,
-    [tgId]
-  );
-  if (res.rowCount === 0) return ctx.reply(`Player not found or Game ID is not pending.`, { parse_mode: 'HTML' });
-  await audit.log(ctx.from.id, 'admin', 'reject_game', 'player', String(tgId));
-  return ctx.reply(`❌ Rejected`, { parse_mode: 'HTML' });
+  return ctx.reply('Game ID review is disabled.\nSubmitted Game IDs are for record only.\nUse /list_players or /export_players to view submitted Game IDs.', { parse_mode: 'HTML' });
 }
 
 // /relink_agent AgentCode
@@ -663,7 +642,7 @@ async function handleSystemStatus(ctx) {
     `🚀 Started: ${startupTime.replace('T', ' ').slice(0, 19)}\n\n` +
     `👥 Agents: ${s.agents} (${s.pending_agents} pending)\n` +
     `👤 Promoters: ${s.promoters}\n` +
-    `🎮 Players: ${s.players} (${s.pending_games} pending games)`,
+    `🎮 Players: ${s.players} (${s.pending_games} submitted Game IDs)`,
     { parse_mode: 'HTML' }
   );
 }

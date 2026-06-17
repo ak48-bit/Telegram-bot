@@ -154,7 +154,7 @@ bot.command('help', async (ctx) => {
   const isAdmin = config.ADMIN_IDS.includes(ctx.from.id);
   let text = '';
   if (isAdmin) {
-    text = '<b>Admin:</b> /admin /system_status /audit_recent\n/find_player /find_promoter /find_agent\n/add_agent /list_agents /list_promoters /list_players\n/list_agent_applications /approve_agent /reject_agent\n/block_agent /block_promoter /block_player\n/unblock_agent /unblock_promoter /unblock_player\n/change_player_owner /export_players\n/list_pending /approve_game /reject_game\n';
+    text = '<b>Admin:</b> /admin /system_status /audit_recent\n/find_player /find_promoter /find_agent\n/add_agent /list_agents /list_promoters /list_players\n/list_agent_applications /approve_agent /reject_agent\n/block_agent /block_promoter /block_player\n/unblock_agent /unblock_promoter /unblock_player\n/change_player_owner /export_players\n';
   }
   if (user.role === 'agent') {
     text += '\n<b>Agent:</b> /agent /add_promoter /update_promoter_link\n/list_my_promoters /list_my_players /export_my_players\n/set_agent_link /my_agent_link /relink_pm\n';

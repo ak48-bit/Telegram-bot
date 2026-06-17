@@ -181,7 +181,7 @@ async function handlePlayerBind(ctx, uid, promoter, payload) {
   await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });
 
   return ctx.reply(
-    `🎰 <b>Welcome!</b>\nReferral Source：<code>${promoter.promoter_code}</code>\n\nAvailable Commands：/submit PH90xxxx | /my`,
+    `🎰 <b>Welcome!</b>\nReferral Source：<code>${promoter.promoter_code}</code>\n\nAvailable Commands：/submit YourGameID | /my | /share`,
     { parse_mode: 'HTML' }
   );
 }
@@ -192,7 +192,7 @@ async function handlePlainStart(ctx, user) {
     admin: `👑 <b>Admin Panel</b>\n\n/admin — Admin Menu`,
     agent: `👥 <b>Agent Panel</b>\n\n/agent — View Menu`,
     promoter: `📢 <b>Promoter Panel</b>\n\n/promoter — View Menu`,
-    player: `🎮 <b>Player Panel</b>\n\n/submit GameID — Submit Game ID\n/my — View Info`,
+    player: `🎮 <b>Player Panel</b>\n\n/submit YourGameID — Submit Game ID\n/my — View Info\n/share — Share activity link`,
   };
   return ctx.reply(texts[user.role] || `🤖 <b>Welcome!</b>\n\nIf you have a referral link, please use it to enter.`);
 }

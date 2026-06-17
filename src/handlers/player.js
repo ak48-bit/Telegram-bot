@@ -63,9 +63,9 @@ async function handleSubmit(ctx) {
     return ctx.reply('This referral line has been suspended. Please contact customer service.');
   }
 
-  if (p.game_id_status === 'approved') {
-    await audit.log(uid, 'player', 'submit_game_id_already_approved', 'player', String(uid), { game_id: gameId });
-    return ctx.reply('Your Game ID has already been approved and cannot be changed.');
+  if (p.game_id_status === 'approved' || p.game_id_status === 'submitted') {
+    await audit.log(uid, 'player', 'submit_game_id_already_submitted', 'player', String(uid), { game_id: gameId });
+    return ctx.reply('Your Game ID has already been submitted and cannot be changed.');
   }
 
   const dup = await db.query(
@@ -77,13 +77,13 @@ async function handleSubmit(ctx) {
   }
 
   await db.query(
-    `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'pending', updated_at = NOW() WHERE telegram_id = $3`,
+    `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted', updated_at = NOW() WHERE telegram_id = $3`,
     [gameId, gameId, uid]
   );
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId });
 
   return ctx.reply(
-    `🎮 <b>Submit Game ID</b>\n\n<code>/submit ${gameId}</code>\n\n✅ Submitted Successfully\nGame ID：<code>${gameId}</code>\nStatus：Pending Review ⏳\n\n<i>Please wait for Admin review.</i>`,
+    `🎮 <b>Game ID Submitted</b>\n\n<code>/submit ${gameId}</code>\n\n✅ Game ID submitted successfully.\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`,
     { parse_mode: 'HTML' }
   );
 }
@@ -98,7 +98,7 @@ async function handlePlayerMy(ctx) {
   );
   if (player.rows.length === 0) return ctx.reply('No referral source bound. Enter through a Bot Share Link.');
   const p = player.rows[0];
-  const statusText = { pending: 'Pending Review...⏳', approved: 'Approved ✅', rejected: 'Rejected ❌' };
+  const statusText = { submitted: 'Submitted ✅', approved: 'Recorded ✅', pending: 'Recorded ✅', rejected: 'Recorded' };
   const st = statusText[p.game_id_status] || 'Not submitted';
   return ctx.reply(
     `🎮\n\nTelegram：@${ctx.from.username || '-'}\nTelegram ID：<code>${uid}</code>\nGame ID：<code>${p.game_id || 'Not submitted'}</code>\nStatus：${st}\n\n👤 Promoter：${p.promoter_name || '-'} (${p.promoter_code || '-'})`,

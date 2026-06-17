@@ -17,7 +17,7 @@ async function handleAdmin(ctx) {
       (SELECT COUNT(*) FROM promoters WHERE status = 'blocked') AS blocked_promoters,
       (SELECT COUNT(*) FROM players) AS players,
       (SELECT COUNT(*) FROM players WHERE created_at::date = CURRENT_DATE) AS today_players,
-      (SELECT COUNT(*) FROM players WHERE game_id IS NOT NULL AND game_id_status = 'pending') AS pending_games
+      (SELECT COUNT(*) FROM players WHERE game_id IS NOT NULL) AS submitted_games
   `);
   const s = stats.rows[0];
   return ctx.reply(
@@ -25,7 +25,7 @@ async function handleAdmin(ctx) {
     `👥 Agents: ${s.active_agents} active / ${s.blocked_agents} blocked / ${s.agents} total\n` +
     `👤 Promoters: ${s.active_promoters} active / ${s.blocked_promoters} blocked / ${s.promoters} total\n` +
     `🎮 Players: ${s.players} total | 🆕 Today: ${s.today_players}\n` +
-    `⏳ Pending: ${s.pending_agents || 0} agent apps | 🎮 Submitted Game IDs: ${s.pending_games || 0}\n\n` +
+    `⏳ Pending Agent Apps: ${s.pending_agents || 0} | 🎮 Submitted Game IDs: ${s.submitted_games || 0}\n\n` +
     `<b>Quick Actions:</b>`,
     {
       parse_mode: 'HTML',
@@ -631,7 +631,7 @@ async function handleSystemStatus(ctx) {
       (SELECT COUNT(*) FROM agents WHERE approval_status = 'pending') AS pending_agents,
       (SELECT COUNT(*) FROM promoters) AS promoters,
       (SELECT COUNT(*) FROM players) AS players,
-      (SELECT COUNT(*) FROM players WHERE game_id_status = 'pending') AS pending_games
+      (SELECT COUNT(*) FROM players WHERE game_id IS NOT NULL) AS submitted_games
   `);
   const s = stats.rows[0];
   return ctx.reply(
@@ -642,7 +642,7 @@ async function handleSystemStatus(ctx) {
     `🚀 Started: ${startupTime.replace('T', ' ').slice(0, 19)}\n\n` +
     `👥 Agents: ${s.agents} (${s.pending_agents} pending)\n` +
     `👤 Promoters: ${s.promoters}\n` +
-    `🎮 Players: ${s.players} (${s.pending_games} submitted Game IDs)`,
+    `🎮 Players: ${s.players} (${s.submitted_games} submitted Game IDs)`,
     { parse_mode: 'HTML' }
   );
 }

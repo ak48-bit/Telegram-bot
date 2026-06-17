@@ -18,8 +18,10 @@ async function handleAgent(ctx) {
   const a = ag.rows[0];
   const stats = await db.query(
     `SELECT (SELECT COUNT(*) FROM promoters WHERE agent_id = $1) AS promoters,
+            (SELECT COUNT(*) FROM promoters WHERE agent_id = $1 AND status = 'active') AS active_promoters,
             (SELECT COUNT(*) FROM players WHERE agent_id = $1) AS players,
-            (SELECT COUNT(*) FROM players WHERE agent_id = $1 AND created_at::date = CURRENT_DATE) AS today_players`,
+            (SELECT COUNT(*) FROM players WHERE agent_id = $1 AND created_at::date = CURRENT_DATE) AS today_players,
+            (SELECT COUNT(*) FROM players WHERE agent_id = $1 AND game_id IS NOT NULL) AS submitted_players`,
     [a.id]
   );
   const s = stats.rows[0];
@@ -52,8 +54,8 @@ async function handleAgent(ctx) {
     `Agent Code：<code>${a.agent_code}</code>\n` +
     `Name：${a.name}\n` +
     `${agentLinkLine}\n` +
-    `Promoters：${s.promoters} total\n` +
-    `Players：${s.players} total | 🆕 Today: ${s.today_players}\n\n` +
+    `Promoters：${s.promoters} total (${s.active_promoters} active)\n` +
+    `Players：${s.players} total | 🆕 Today: ${s.today_players} | 🎮 Submitted: ${s.submitted_players}\n\n` +
     `<b>Promoter List：</b>` + (pmList || '\nNo Promoters') + '\n' +
     ``,
     {

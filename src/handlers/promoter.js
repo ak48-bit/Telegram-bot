@@ -29,7 +29,9 @@ async function handlePromoter(ctx) {
 
   const p = pm.rows[0];
   const stats = await db.query(
-    `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today FROM players WHERE promoter_id = $1`, [p.id]
+    `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE created_at::date = CURRENT_DATE) AS today,
+            COUNT(*) FILTER (WHERE game_id IS NOT NULL) AS submitted
+     FROM players WHERE promoter_id = $1`, [p.id]
   );
   const s = stats.rows[0];
 
@@ -46,7 +48,7 @@ async function handlePromoter(ctx) {
     `Telegram ID：<code>${uid}</code>\n` +
     `${linkLine}\n` +
     `Link Status：${p.link_status || 'NOT_SUBMITTED'}\n\n` +
-    `Players：${s.total} total | 🆕 Today: ${s.today}\n\n` +
+    `Players：${s.total} total | 🆕 Today: ${s.today} | 🎮 Submitted: ${s.submitted}\n\n` +
     `/my_link | /my_players | /my_today | /share\n\n` +
     `<i>Your link is managed by your Agent.\nUse /share to get your sharing message.</i>`,
     { parse_mode: 'HTML' }
@@ -131,15 +133,14 @@ async function handleMyToday(ctx) {
   const pm = await db.query('SELECT id, promoter_code FROM promoters WHERE telegram_id = $1 AND status = $2', [uid, 'active']);
   if (pm.rows.length === 0) return ctx.reply('Promoter not bound or blocked.');
   const stats = await db.query(
-    `SELECT COUNT(*) AS today, COUNT(*) FILTER (WHERE game_id IS NOT NULL) AS submitted,
-            COUNT(*) FILTER (WHERE game_id_status = 'approved') AS approved
+    `SELECT COUNT(*) AS today, COUNT(*) FILTER (WHERE game_id IS NOT NULL) AS submitted
      FROM players WHERE promoter_id = $1 AND created_at::date = CURRENT_DATE`, [pm.rows[0].id]
   );
   const s = stats.rows[0];
   return ctx.reply(
     `📅 <b>Today — ${new Date().toISOString().slice(0, 10)}</b>\n\n` +
     `Code：<code>${pm.rows[0].promoter_code}</code>\n\n` +
-    `🆕 Today：<b>${s.today}</b>\n📝 Submitted：<b>${s.submitted}</b>\n✅ Approved：<b>${s.approved}</b>`,
+    `🆕 Today：<b>${s.today}</b>\n📝 Submitted：<b>${s.submitted}</b>`,
     { parse_mode: 'HTML' }
   );
 }

@@ -28,7 +28,7 @@ const {
   handlePromoter, handleMyLink, handleMyPlayers, handleMyToday,
   handleSetPlayerLink, handleSetPromoCompat, handleShare,
 } = require('./handlers/promoter');
-const { handleSubmit, handlePlayerMy } = require('./handlers/player');
+const { handleSubmit, handlePlayerMy, handlePlayerShare } = require('./handlers/player');
 
 const bot = new Telegraf(config.BOT_TOKEN);
 const startupTime = new Date().toISOString();
@@ -105,7 +105,10 @@ bot.command('promoter', requireRole('promoter'), handlePromoter);
 bot.command('my_players', requireRole('promoter'), handleMyPlayers);
 bot.command('my_today', requireRole('promoter'), handleMyToday);
 bot.command('set_player_link', requireRole('promoter'), handleSetPlayerLink);
-bot.command('share', requireRole('promoter'), handleShare);
+bot.command('share', requireRole('promoter', 'player'), async (ctx) => {
+  if (ctx.state.user.role === 'promoter') return handleShare(ctx);
+  return handlePlayerShare(ctx);
+});
 
 // Player — /submit only for players
 bot.command('submit', requireRole('player'), handleSubmit);

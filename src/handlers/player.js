@@ -2,7 +2,10 @@ const db = require('../db');
 const audit = require('../services/audit');
 const config = require('../config');
 
-const GAME_ID_REGEX = new RegExp(config.GAME_ID_REGEX);
+const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
+
+// Game ID: 3-32 chars, A-Z a-z 0-9 only
+const GAME_ID_REGEX = /^[A-Za-z0-9]{3,32}$/;
 
 // /submit
 async function handleSubmit(ctx) {
@@ -19,9 +22,9 @@ async function handleSubmit(ctx) {
   const gameId = raw.trim().toUpperCase();
 
   // Validate format
-  if (!GAME_ID_REGEX.test(gameId)) {
+  if (!GAME_ID_REGEX.test(raw.trim())) {
     await audit.log(uid, 'player', 'submit_game_id_invalid', 'player', String(uid), { game_id: raw });
-    return ctx.reply('Invalid Game ID format.');
+    return ctx.reply('Invalid Game ID. Use 3-32 letters or numbers only.');
   }
 
   // Rate limit: per minute
@@ -33,7 +36,6 @@ async function handleSubmit(ctx) {
     await audit.log(uid, 'player', 'submit_game_id_rate_limited', 'player', String(uid), { reason: 'per_minute' });
     return ctx.reply('Too many submissions. Please try again later.');
   }
-  // Rate limit: per hour
   const rateHour = await db.query(
     `SELECT COUNT(*) FROM rate_limits WHERE telegram_id = $1 AND attempt_type = 'submit_game_id' AND created_at > NOW() - INTERVAL '1 hour'`,
     [uid]
@@ -44,7 +46,6 @@ async function handleSubmit(ctx) {
   }
   await db.query(`INSERT INTO rate_limits (telegram_id, attempt_type) VALUES ($1, 'submit_game_id')`, [uid]);
 
-  // Check player exists and get chain status
   const player = await db.query(
     `SELECT p.*, pm.status AS pm_status, a.status AS ag_status
      FROM players p
@@ -57,19 +58,16 @@ async function handleSubmit(ctx) {
   }
   const p = player.rows[0];
 
-  // Check referral chain not blocked
   if (p.pm_status === 'blocked' || p.ag_status === 'blocked') {
     await audit.log(uid, 'player', 'submit_game_id_blocked_line', 'player', String(uid));
     return ctx.reply('This referral line has been suspended. Please contact customer service.');
   }
 
-  // Reject if already approved
   if (p.game_id_status === 'approved') {
     await audit.log(uid, 'player', 'submit_game_id_already_approved', 'player', String(uid), { game_id: gameId });
     return ctx.reply('Your Game ID has already been approved and cannot be changed.');
   }
 
-  // Check duplicate (normalized)
   const dup = await db.query(
     `SELECT telegram_id FROM players WHERE game_id_normalized = $1 AND telegram_id != $2`, [gameId, uid]
   );
@@ -78,7 +76,6 @@ async function handleSubmit(ctx) {
     return ctx.reply('This Game ID has already been submitted.');
   }
 
-  // Save — pending admin review
   await db.query(
     `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'pending', updated_at = NOW() WHERE telegram_id = $3`,
     [gameId, gameId, uid]
@@ -109,4 +106,29 @@ async function handlePlayerMy(ctx) {
   );
 }
 
-module.exports = { handleSubmit, handlePlayerMy };
+// /share — Player shares their promoter's Bot Share link
+async function handlePlayerShare(ctx) {
+  const uid = ctx.from.id;
+  const player = await db.query(
+    `SELECT p.*, pm.promoter_code, pm.player_affiliate_link_original, pm.player_referral_token
+     FROM players p
+     JOIN promoters pm ON p.promoter_id = pm.id
+     WHERE p.telegram_id = $1`, [uid]
+  );
+  if (player.rows.length === 0) {
+    return ctx.reply('You do not have a referral source yet. Please enter through a valid activity link.');
+  }
+  const p = player.rows[0];
+  const botLink = `https://t.me/${BOT_USERNAME}?start=p_${p.player_referral_token}`;
+
+  let msg = `📋 <b>Share Activity</b>\n\nShare this activity link with your friends.\n\n`;
+  msg += `🤖 <b>Bot Entry Link：</b>\n${botLink}\n`;
+  if (p.player_affiliate_link_original) {
+    msg += `\n🎮 <b>Game Registration Link：</b>\n${p.player_affiliate_link_original}\n`;
+  }
+  msg += `\nYour friends can enter the Bot and follow the activity instructions.\n`;
+  msg += `Rewards are claimed in-game according to the activity rules.`;
+  return ctx.reply(msg, { parse_mode: 'HTML' });
+}
+
+module.exports = { handleSubmit, handlePlayerMy, handlePlayerShare };

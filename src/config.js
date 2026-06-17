@@ -41,7 +41,7 @@ const config = {
     agent: ['/agent', '/add_promoter', '/list_my_promoters', '/list_my_players',
             '/my_agent_link', '/export_my_players', '/set_agent_link'],
     promoter: ['/promoter', '/my_link', '/share', '/my_players', '/my_today'],
-    player: ['/my', '/submit'],
+    player: ['/my', '/submit', '/share'],
   },
 
   // High-risk commands NEVER allowed via cmd: callback (must use dedicated handlers with params)

@@ -110,7 +110,7 @@ async function handleAddAgent(ctx) {
   const token = await createInviteToken('agent_bind', agentCode, ctx.from.id);
   const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
 
-  await audit.log(ctx.from.id, 'admin', 'create_agent', 'agent', agentCode, { name, token });
+  await audit.log(ctx.from.id, 'admin', 'create_agent', 'agent', agentCode, { name });
 
   return ctx.reply(
     `👥 <b>Admin Create Agent</b>\n\n` +

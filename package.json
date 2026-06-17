@@ -1,7 +1,7 @@
 {
-  "name": "multi-level-referral-bot",
+  "name": "ph90-wfh-bot",
   "version": "1.0.0",
-  "description": "Multi-level Agent Referral Telegram Bot (Admin → Agent → Promoter → Player)",
+  "description": "PH90 WFH Bot — Telegram referral tracking bot (Admin → Agent → Promoter → Player)",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",

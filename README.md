@@ -1,4 +1,4 @@
-# PH90 Bonus Bot — Multi-Level Referral Telegram Bot
+# PH90 WFH Bot — Telegram Referral Tracking Bot
 
 ## Architecture
 

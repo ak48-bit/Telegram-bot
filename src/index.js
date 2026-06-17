@@ -330,7 +330,7 @@ async function start() {
       try {
         const { query } = require('./db');
         await query('SELECT 1');
-        res.json({ ok: true, db: 'connected', time: new Date().toISOString(), service: 'PH90 Bonus Bot' });
+        res.json({ ok: true, db: 'connected', time: new Date().toISOString(), service: 'PH90 WFH Bot' });
       } catch (e) {
         res.json({ ok: false, db: 'error', time: new Date().toISOString() });
       }

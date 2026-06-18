@@ -101,7 +101,7 @@ async function executeConfirmedAction(ctx, s) {
       await audit.log(uid, 'admin', 'step_create_agent_confirmed', 'agent', agentCode, { name });
       session.delete(uid);
       return ctx.editMessageText(
-        `Agent Created Successfully\nAgent Code: ${agentCode}\nName: ${name}\n\nAgent Bot Link:\n${link}\n\n⚠️ No expiry, unlimited use.\nAfter binding, use /set_agent_link.`,
+        `Agent Created Successfully\nAgent Code: ${agentCode}\nName: ${name}\n\n📋 Send this to Agent:\n\n/start bind_agent_${token}\n\n⚠️ One-time identity binding link. Valid 72h.\nDo not share in groups. Invalid after use.`,
         { parse_mode: 'HTML' }
       ).catch(() => {});
     }

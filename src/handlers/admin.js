@@ -108,22 +108,28 @@ async function handleAddAgent(ctx) {
 
   // 生成一次性绑定 token
   const token = await createInviteToken('agent_bind', agentCode, ctx.from.id);
-  const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
+  const botLink = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
+  const manualCmd = `/start bind_agent_${token}`;
 
   await audit.log(ctx.from.id, 'admin', 'create_agent', 'agent', agentCode, { name });
 
   return ctx.reply(
     `👥 <b>Admin Create Agent</b>\n\n` +
-    `<code>/add_agent ${agentCode} ${name}</code>\n\n` +
     `✅ Agent Created Successfully\n` +
     `Agent Code：<code>${agentCode}</code>\n` +
     `Name：${name}\n\n` +
-    `📋 Agent Bot Link：\n` +
-    `${link}\n` +
-    `━━━━━━━━━━━━━━━\n\n` +
-    `⚠️ This identity binding link is valid for 72 hours and can only be used once.\nDo not share it in groups.\n\n` +
-    `<i>After binding, use /set_agent_link to submit your Agent Affiliate Link.</i>`,
-    { parse_mode: 'HTML' }
+    `<b>📋 Send this to Agent：</b>\n\n` +
+    `<code>${manualCmd}</code>\n\n` +
+    `⚠️ One-time identity binding link. Valid 72h.\n` +
+    `Do not share in groups. Invalid after use.\n\n` +
+    `<i>If the button below is not clickable, copy the command above and send it to the Agent.</i>`,
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[
+        { text: '🔗 Bind Agent', url: botLink }
+      ]] }
+    }
   );
 }
 
@@ -329,9 +335,26 @@ async function handleRelinkAgent(ctx) {
   if (ag.rows.length === 0) return ctx.reply(`Agent <code>${code}</code> not found.`, { parse_mode: 'HTML' });
   await db.query(`UPDATE invite_tokens SET is_used = TRUE WHERE code = $1 AND type = 'agent_bind' AND is_used = FALSE`, [code]);
   const token = await createInviteToken('agent_bind', code, ctx.from.id);
-  const link = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
+  const botLink = `https://t.me/${BOT_USERNAME}?start=bind_agent_${token}`;
+  const manualCmd = `/start bind_agent_${token}`;
   await audit.log(ctx.from.id, 'admin', 'relink_agent', 'agent', code);
-  return ctx.reply(`🔗 <b>Agent Binding Link (New)</b>\n\nCode：<code>${code}</code>\n\n<code>${link}</code>\n\n⚠️ Old link invalidated.\n⚠️ Valid for 72 hours, one-time use only.\nDo not share in groups.`, { parse_mode: 'HTML' });
+  return ctx.reply(
+    `🔗 <b>Agent Binding Link (New)</b>\n\n` +
+    `Code：<code>${code}</code>\n\n` +
+    `<b>📋 Send this to Agent：</b>\n\n` +
+    `<code>${manualCmd}</code>\n\n` +
+    `⚠️ Old link invalidated.\n` +
+    `⚠️ One-time identity binding link. Valid 72h.\n` +
+    `Do not share in groups. Invalid after use.\n\n` +
+    `<i>If the button below is not clickable, copy the command above and send it to the Agent.</i>`,
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[
+        { text: '🔗 Bind Agent', url: botLink }
+      ]] }
+    }
+  );
 }
 
 // /reset_agent_link AgentCode

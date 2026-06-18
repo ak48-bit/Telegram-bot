@@ -150,19 +150,28 @@ async function handleAddPromoter(ctx) {
 
   const bindToken = await createInviteToken('promoter_bind', promoterCode, uid);
   const botLink = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${bindToken}`;
+  const manualCmd = `/start bind_promoter_${bindToken}`;
   await audit.log(uid, 'agent', 'agent_create_promoter_with_link', 'promoter', promoterCode, { name, link: result.normalized });
 
   return ctx.reply(
     `👥 <b>Agent Creates a Promoter</b>\n\n` +
-    `<code>/add_promoter ${promoterCode} ${name} ${rawLink}</code>\n\n` +
     `✅ Promoter Created Successfully\n` +
     `Promoter Code：<code>${promoterCode}</code>\n` +
     `Name：${name}\n` +
     `Affiliate Link：${result.original}\n` +
     `Link Status：BOUND\n\n` +
-    `Promoter Bot Link：\n${botLink}\n\n` +
-    `⚠️ This is a one-time identity binding link.\nDo not share it in groups.\nIt becomes invalid after use.\n\n<i>Your Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.</i>`,
-    { parse_mode: 'HTML' }
+    `<b>📋 Send this to Promoter：</b>\n\n` +
+    `<code>${manualCmd}</code>\n\n` +
+    `⚠️ One-time identity binding link. Valid 72h.\n` +
+    `Do not share in groups. Invalid after use.\n\n` +
+    `<i>If the button below is not clickable, copy the command above and send it to the Promoter's Telegram chat.</i>`,
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[
+        { text: '🔗 Bind Promoter', url: botLink }
+      ]] }
+    }
   );
 }
 
@@ -302,9 +311,27 @@ async function handleRelinkPromoter(ctx) {
   if (pm.rows.length === 0) return ctx.reply(`Promoter <code>${code}</code> not found or not under you.`, { parse_mode: 'HTML' });
   await db.query(`UPDATE invite_tokens SET is_used = TRUE WHERE code = $1 AND type = 'promoter_bind' AND is_used = FALSE`, [code]);
   const token = await createInviteToken('promoter_bind', code, uid);
-  const link = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
+  const botLink = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
+  const manualCmd = `/start bind_promoter_${token}`;
   await audit.log(uid, 'agent', 'relink_promoter', 'promoter', code);
-  return ctx.reply(`🔗 <b>Promoter Binding Link (New)</b>\n\nCode：<code>${code}</code>\nName：${pm.rows[0].name}\n\n<code>${link}</code>\n\n⚠️ Old link invalidated.\n⚠️ This is a one-time identity binding link.\nDo not share it in groups.\nIt becomes invalid after use.`, { parse_mode: 'HTML' });
+  return ctx.reply(
+    `🔗 <b>Promoter Binding Link (New)</b>\n\n` +
+    `Code：<code>${code}</code>\n` +
+    `Name：${pm.rows[0].name}\n\n` +
+    `<b>📋 Send this to Promoter：</b>\n\n` +
+    `<code>${manualCmd}</code>\n\n` +
+    `⚠️ Old link invalidated.\n` +
+    `⚠️ One-time identity binding link. Valid 72h.\n` +
+    `Do not share in groups. Invalid after use.\n\n` +
+    `<i>If the button below is not clickable, copy the command above and send it to the Promoter's Telegram chat.</i>`,
+    {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[
+        { text: '🔗 Bind Promoter', url: botLink }
+      ]] }
+    }
+  );
 }
 
 // /update_promoter_link <promoter_code> <affiliate_link>

@@ -123,11 +123,18 @@ async function executeConfirmedAction(ctx, s) {
       );
       const token = await createInviteToken('promoter_bind', promoterCode, uid);
       const botLink = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
+      const manualCmd = `/start bind_promoter_${token}`;
       await audit.log(uid, 'agent', 'agent_create_promoter_with_link', 'promoter', promoterCode, { name, link: affiliateLinkNormalized });
       session.delete(uid);
       return ctx.editMessageText(
-        `✅ Promoter Created Successfully\nPromoter Code: ${promoterCode}\nName: ${name}\nAffiliate Link: ${affiliateLink}\nLink Status: BOUND\n\nPromoter Bot Link:\n${botLink}\n\n⚠️ No expiry, unlimited use.\n<i>Your Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.</i>`,
-        { parse_mode: 'HTML' }
+        `✅ Promoter Created Successfully\nPromoter Code: ${promoterCode}\nName: ${name}\nAffiliate Link: ${affiliateLink}\nLink Status: BOUND\n\n📋 Send this to Promoter:\n\n${manualCmd}\n\n⚠️ One-time identity binding link. Valid 72h.`,
+        {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          reply_markup: { inline_keyboard: [[
+            { text: '🔗 Bind Promoter', url: botLink }
+          ]] }
+        }
       ).catch(() => {});
     }
 

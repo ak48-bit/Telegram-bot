@@ -24,7 +24,7 @@ SECRET_TOKEN=<random_string>
 RENDER_APP_URL=https://<your-app>.onrender.com
 ADMIN_IDS=<tgid1>,<tgid2>
 ALLOWED_DOMAINS=<domain1.com>,<www.domain1.com>
-GAME_ID_REGEX=^PH90[A-Za-z0-9]{4,12}$
+GAME_ID_REGEX=^[A-Za-z0-9]{3,32}$
 ```
 
 ### Deploy
@@ -110,7 +110,7 @@ Render: push to `v2-nodejs` → Manual Deploy → Deploy latest commit.
 ### Player
 | Command | Description |
 |---------|-------------|
-| `/submit <PH90xxxx>` | Submit Game ID |
+| `/submit <GameID>` | Submit Game ID (3-32 letters/numbers) |
 | `/my` | My profile |
 
 ### General
@@ -147,6 +147,30 @@ User receives: [📊 Agent Panel] [➕ Add Promoter] [🔗 Set Agent Link] ...
 - All link updates logged with old/new values
 
 ---
+
+## Bot Share Links (Short Format)
+
+| Prefix | Use | Example |
+|--------|-----|---------|
+| `p_A01_<AgentCode>` | Agent info page (not for player binding) | `p_A01_Leo001` |
+| `p_B01_<PromoterCode>` | Promoter referral link | `p_B01_Leostaff001` |
+| `p_C001_<PlayerShareCode>` | Player share (still belongs to original Promoter) | `p_C001_LEOSTAFFPLAYER001` |
+| `p_<random_token>` | Legacy compatibility | Still supported |
+
+## Button vs Slash Commands
+
+### Use Buttons (Recommended)
+- Admin: `/admin` → click buttons
+- Agent: `/agent` → click buttons
+- Promoter: `/promoter` → click buttons
+- Player: `/my` or `/start` → click buttons
+
+### Must Type Commands (High-risk or need params)
+- `/add_agent`, `/block_agent`, `/block_promoter`, `/block_player`
+- `/change_player_owner`, `/relink_agent`, `/relink_pm`
+- `/reset_agent_link`, `/reset_player_link`
+- `/start bind_agent_xxx`, `/start bind_promoter_xxx` (identity binding)
+- `/ping`, `/cancel`
 
 ## Security Test Checklist
 

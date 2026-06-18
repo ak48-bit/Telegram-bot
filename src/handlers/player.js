@@ -102,7 +102,13 @@ async function handlePlayerMy(ctx) {
   const st = statusText[p.game_id_status] || 'Not submitted';
   return ctx.reply(
     `🎮\n\nTelegram：@${ctx.from.username || '-'}\nTelegram ID：<code>${uid}</code>\nGame ID：<code>${p.game_id || 'Not submitted'}</code>\nStatus：${st}\n\n👤 Promoter：${p.promoter_name || '-'} (${p.promoter_code || '-'})`,
-    { parse_mode: 'HTML' }
+    {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+        [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+      ]}
+    }
   );
 }
 

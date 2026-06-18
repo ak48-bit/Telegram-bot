@@ -49,9 +49,14 @@ async function handlePromoter(ctx) {
     `${linkLine}\n` +
     `Link Status：${p.link_status || 'NOT_SUBMITTED'}\n\n` +
     `Players：${s.total} total | 🆕 Today: ${s.today} | 🎮 Submitted: ${s.submitted}\n\n` +
-    `/my_link | /my_players | /my_today | /share\n\n` +
-    `<i>Your link is managed by your Agent.\nUse /share to get your sharing message.</i>`,
-    { parse_mode: 'HTML' }
+    `<i>Your link is managed by your Agent.</i>`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📣 Share', callback_data: 'cmd:/share' }, { text: '🔗 My Links', callback_data: 'cmd:/my_link' }],
+        [{ text: '🎮 My Players', callback_data: 'cmd:/my_players' }, { text: '📅 Today', callback_data: 'cmd:/my_today' }],
+      ]}
+    }
   );
 }
 

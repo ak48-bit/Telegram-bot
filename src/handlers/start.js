@@ -192,9 +192,17 @@ async function handlePlainStart(ctx, user) {
     admin: `👑 <b>Admin Panel</b>\n\n/admin — Admin Menu`,
     agent: `👥 <b>Agent Panel</b>\n\n/agent — View Menu`,
     promoter: `📢 <b>Promoter Panel</b>\n\n/promoter — View Menu`,
-    player: `🎮 <b>Player Panel</b>\n\n/submit YourGameID — Submit Game ID\n/my — View Info\n/share — Share activity link`,
+    player: `🎮 <b>Player Panel</b>`,
+    player_opts: {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+        [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+      ]}
+    },
   };
-  return ctx.reply(texts[user.role] || `🤖 <b>Welcome!</b>\n\nIf you have a referral link, please use it to enter.`);
+  const opts = texts[user.role + '_opts'] || {};
+  return ctx.reply(texts[user.role] || `🤖 <b>Welcome!</b>\n\nIf you have a referral link, please use it to enter.`, opts);
 }
 
 // ═══ Agent Self-Application ═══

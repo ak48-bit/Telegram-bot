@@ -69,11 +69,11 @@ async function handleMyLink(ctx) {
   if (pm.rows.length === 0) return ctx.reply('Promoter not bound.');
   const p = pm.rows[0];
 
-  // Ensure player_referral_token exists (unique)
-  const token = await ensurePlayerReferralToken(p.id, p.player_referral_token);
-  const link = `https://t.me/${BOT_USERNAME}?start=p_${token}`;
+  // Short Bot Share link: p_B01_<PromoterCode>
+  const link = `https://t.me/${BOT_USERNAME}?start=p_B01_${p.promoter_code}`;
 
-  let msg = `📢 <b>Promoter Affiliate Link</b>\n\nPromoter Code：<code>${p.promoter_code}</code>\n`;
+  let msg = `📢 <b>Promoter Affiliate Link</b>\n\nPromoter Code：<code>${p.promoter_code}</code>\n` +
+    `Source Code：B01-${p.promoter_code}\n`;
   if (p.link_status === 'BOUND' && p.player_affiliate_link_original) {
     msg += `Player Affiliate Link：\n${p.player_affiliate_link_original}\n`;
   } else {
@@ -167,9 +167,8 @@ async function handleShare(ctx) {
     );
   }
 
-  // Ensure player_referral_token exists (unique)
-  const token = await ensurePlayerReferralToken(p.id, p.player_referral_token);
-  const link = `https://t.me/${BOT_USERNAME}?start=p_${token}`;
+  // Short Bot Share link
+  const link = `https://t.me/${BOT_USERNAME}?start=p_B01_${p.promoter_code}`;
 
   let msg = `📋 <b>Promoter Sharing Message</b>\n\n  Copy and send to players：\n\n`;
   msg += `  🎮 Register & Join\n`;

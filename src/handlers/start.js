@@ -17,6 +17,11 @@ async function handleStart(ctx) {
   if (payload.startsWith('bind_agent_') || payload.startsWith('bind_promoter_')) {
     return handleBindToken(ctx, payload, uid);
   }
+  // Short links: p_A01_<AgentCode>, p_B01_<PromoterCode>, p_C001_<PlayerShareCode>
+  if (payload.startsWith('p_A01_') || payload.startsWith('p_B01_') || payload.startsWith('p_C001_')) {
+    return handleShortLink(ctx, payload, uid);
+  }
+  // Legacy: p_<random_token>
   if (payload.startsWith('p_')) {
     return handlePlayerEntry(ctx, payload, uid);
   }
@@ -180,6 +185,88 @@ async function handlePlayerBind(ctx, uid, promoter, payload) {
   await db.query(`UPDATE users SET role = 'player', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
   await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });
 
+  return ctx.reply(
+    `🎰 <b>Welcome!</b>\nReferral Source：<code>${promoter.promoter_code}</code>\n\nAvailable Commands：/submit YourGameID | /my | /share`,
+    { parse_mode: 'HTML' }
+  );
+}
+
+// ═══ Short Link Handlers ═══
+async function handleShortLink(ctx, payload, uid) {
+  // Prevent Admin/Agent/Promoter from becoming Player via short links
+  const currentUser = await db.query('SELECT role FROM users WHERE telegram_id = $1', [uid]);
+  if (currentUser.rows.length > 0) {
+    const role = currentUser.rows[0].role;
+    if (role === 'admin' || role === 'agent' || role === 'promoter') {
+      return ctx.reply('This referral link is for players only.');
+    }
+  }
+
+  if (payload.startsWith('p_B01_')) {
+    const promoterCode = payload.replace('p_B01_', '');
+    const pm = await db.query(
+      `SELECT pm.*, a.status AS ag_status FROM promoters pm JOIN agents a ON pm.agent_id = a.id WHERE pm.promoter_code = $1`, [promoterCode]
+    );
+    if (pm.rows.length === 0) return ctx.reply('Invalid referral link.');
+    if (pm.rows[0].status === 'blocked' || pm.rows[0].ag_status === 'blocked') {
+      return ctx.reply('This referral link has been suspended.');
+    }
+    await audit.log(uid, 'player', 'player_linked_short_b01', 'promoter', promoterCode);
+    return handlePlayerBindShort(ctx, uid, pm.rows[0]);
+  }
+
+  if (payload.startsWith('p_C001_')) {
+    const shareCode = payload.replace('p_C001_', '');
+    // Find player by game_id_normalized or player_share_code
+    let player = await db.query('SELECT * FROM players WHERE game_id_normalized = $1', [shareCode.toUpperCase()]);
+    if (player.rows.length === 0) {
+      player = await db.query('SELECT * FROM players WHERE player_share_code = $1', [shareCode]);
+    }
+    if (player.rows.length === 0) return ctx.reply('Invalid referral link.');
+    const src = player.rows[0];
+    if (!src.promoter_id || !src.agent_id) {
+      await audit.log(uid, 'player', 'short_referral_player_source_missing', 'player', shareCode);
+      return ctx.reply('Invalid referral link.');
+    }
+    const pm = await db.query(
+      `SELECT pm.*, a.status AS ag_status FROM promoters pm JOIN agents a ON pm.agent_id = a.id WHERE pm.id = $1`, [src.promoter_id]
+    );
+    if (pm.rows.length === 0 || pm.rows[0].status === 'blocked' || pm.rows[0].ag_status === 'blocked') {
+      return ctx.reply('This referral link has been suspended.');
+    }
+    await audit.log(uid, 'player', 'player_linked_short_c001', 'player', shareCode, { via_player: String(src.telegram_id) });
+    return handlePlayerBindShort(ctx, uid, pm.rows[0]);
+  }
+
+  if (payload.startsWith('p_A01_')) {
+    // Agent entry — informational only, don't create player
+    const agentCode = payload.replace('p_A01_', '');
+    const ag = await db.query('SELECT * FROM agents WHERE agent_code = $1 AND status = $2', [agentCode, 'active']);
+    if (ag.rows.length === 0) return ctx.reply('Invalid referral link.');
+    return ctx.reply(
+      `👥 <b>Agent：${agentCode}</b>\n\nPlease enter through a Promoter Bot Share Link to participate.\nContact your Promoter for the correct link.`,
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  return ctx.reply('Invalid referral link.');
+}
+
+async function handlePlayerBindShort(ctx, uid, promoter) {
+  const existing = await db.query('SELECT * FROM players WHERE telegram_id = $1', [uid]);
+  if (existing.rows.length > 0) {
+    const oldPm = await db.query('SELECT promoter_code FROM promoters WHERE id = $1', [existing.rows[0].promoter_id]);
+    await audit.log(uid, 'player', 'player_relink_blocked', 'promoter', oldPm.rows[0]?.promoter_code, { attempted: promoter.promoter_code });
+    return ctx.reply(
+      `⚠️ You already have a referral source.\n\nCurrent Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\nTo change, contact customer service.`
+    );
+  }
+  await db.query(
+    `INSERT INTO players (telegram_id, username, first_name, last_name, promoter_id, agent_id, first_start_payload) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [uid, ctx.from.username, ctx.from.first_name, ctx.from.last_name, promoter.id, promoter.agent_id, 'short_' + promoter.promoter_code]
+  );
+  await db.query(`UPDATE users SET role = 'player', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
+  await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });
   return ctx.reply(
     `🎰 <b>Welcome!</b>\nReferral Source：<code>${promoter.promoter_code}</code>\n\nAvailable Commands：/submit YourGameID | /my | /share`,
     { parse_mode: 'HTML' }

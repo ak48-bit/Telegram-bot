@@ -10,7 +10,7 @@ const db = require('../db');
 const config = require('../config');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
-const GAME_ID_REGEX = /^[A-Za-z0-9]{3,32}$/;
+const GAME_ID_REGEX = new RegExp(config.GAME_ID_REGEX);
 const AGENT_CODE_REGEX = config.AGENT_CODE_REGEX;
 const RESERVED_AGENT_CODES = config.RESERVED_AGENT_CODES.map(c => c.toLowerCase());
 
@@ -278,7 +278,7 @@ async function stepSubmitGameId(ctx, s, text) {
     session.delete(uid);
     return ctx.reply('This Game ID has already been submitted.');
   }
-  await db.query(`UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted', updated_at = NOW() WHERE telegram_id = $3`, [gameId, gameId, uid]);
+  await db.query(`UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted', player_share_code = COALESCE(player_share_code, $2), updated_at = NOW() WHERE telegram_id = $3`, [gameId, gameId, uid]);
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId });
   session.delete(uid);
   return ctx.reply(`🎮 <b>Game ID Submitted</b>\n\n/submit ${gameId}\n\n✅ Game ID submitted successfully.\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`, { parse_mode: 'HTML' });

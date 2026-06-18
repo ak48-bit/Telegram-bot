@@ -162,6 +162,8 @@ async function initDB() {
   // Drop FK on created_by_agent_id if it references users(telegram_id) — we store agents.id now
   await query("ALTER TABLE promoters DROP CONSTRAINT IF EXISTS promoters_created_by_agent_id_fkey").catch(() => {});
   await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT");
+  await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS player_share_code TEXT");
+  await query("CREATE UNIQUE INDEX IF NOT EXISTS idx_players_share_code ON players(player_share_code)");
   // Add 'submitted' to game_id_status CHECK constraint
   await query("ALTER TABLE players DROP CONSTRAINT IF EXISTS players_game_id_status_check").catch(() => {});
   await query("ALTER TABLE players ADD CONSTRAINT players_game_id_status_check CHECK (game_id_status IN ('submitted','pending','approved','rejected'))").catch(() => {});

@@ -4,8 +4,7 @@ const config = require('../config');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 
-// Game ID: 3-32 chars, A-Z a-z 0-9 only
-const GAME_ID_REGEX = /^[A-Za-z0-9]{3,32}$/;
+const GAME_ID_REGEX = new RegExp(config.GAME_ID_REGEX);
 
 // /submit
 async function handleSubmit(ctx) {
@@ -77,7 +76,8 @@ async function handleSubmit(ctx) {
   }
 
   await db.query(
-    `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted', updated_at = NOW() WHERE telegram_id = $3`,
+    `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted',
+           player_share_code = COALESCE(player_share_code, $2), updated_at = NOW() WHERE telegram_id = $3`,
     [gameId, gameId, uid]
   );
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId });
@@ -125,9 +125,22 @@ async function handlePlayerShare(ctx) {
     return ctx.reply('You do not have a referral source yet. Please enter through a valid activity link.');
   }
   const p = player.rows[0];
-  const botLink = `https://t.me/${BOT_USERNAME}?start=p_${p.player_referral_token}`;
+
+  // Ensure player_share_code — use game_id_normalized, or generate unique code
+  let shareCode = p.player_share_code;
+  if (!shareCode) {
+    shareCode = p.game_id_normalized;
+    if (!shareCode) {
+      const crypto = require('crypto');
+      shareCode = crypto.randomBytes(8).toString('hex');
+    }
+    await db.query('UPDATE players SET player_share_code = $1 WHERE telegram_id = $2', [shareCode, uid]);
+  }
+
+  const botLink = `https://t.me/${BOT_USERNAME}?start=p_C001_${shareCode}`;
 
   let msg = `📋 <b>Share Activity</b>\n\nShare this activity link with your friends.\n\n`;
+  msg += `Source Code：C001-${shareCode}\n`;
   msg += `🤖 <b>Bot Entry Link：</b>\n${botLink}\n`;
   if (p.player_affiliate_link_original) {
     msg += `\n🎮 <b>Game Registration Link：</b>\n${p.player_affiliate_link_original}\n`;

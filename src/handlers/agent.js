@@ -153,18 +153,39 @@ async function handleAddPromoter(ctx) {
   const manualCmd = `/start bind_promoter_${bindToken}`;
   await audit.log(uid, 'agent', 'agent_create_promoter_with_link', 'promoter', promoterCode, { name, link: result.normalized });
 
-  return ctx.reply(
+  // Card 1: Agent confirmation
+  await ctx.reply(
     `👥 <b>Agent Creates a Promoter</b>\n\n` +
-    `✅ Promoter Created Successfully\n` +
+    `✅ Promoter Created Successfully\n\n` +
     `Promoter Code：<code>${promoterCode}</code>\n` +
     `Name：${name}\n` +
     `Affiliate Link：${result.original}\n` +
-    `Link Status：BOUND\n\n` +
-    `<b>📋 Send this to Promoter：</b>\n\n` +
-    `<code>${manualCmd}</code>\n\n` +
+    `Link Status：BOUND\n` +
+    `Status：<b>Waiting for Promoter binding</b>\n\n` +
+    `<b>Agent Next Step：</b>\n` +
+    `Forward the Promoter Binding Card below to the Promoter.`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📋 My Promoters', callback_data: 'cmd:/list_my_promoters' }],
+        [{ text: '📊 Agent Panel', callback_data: 'cmd:/agent' }],
+      ]}
+    }
+  );
+
+  // Card 2: Promoter binding card (forwardable)
+  return ctx.reply(
+    `🔗 <b>Promoter Binding Card</b>\n\n` +
+    `Promoter Code：<code>${promoterCode}</code>\n` +
+    `Name：${name}\n\n` +
+    `Please bind your Telegram account to this Promoter profile.\n\n` +
+    `<b>Bot Binding Link：</b>\n${botLink}\n\n` +
+    `<b>Manual command：</b>\n<code>${manualCmd}</code>\n\n` +
     `⚠️ One-time identity binding link. Valid 72h.\n` +
     `Do not share in groups. Invalid after use.\n\n` +
-    `<i>If the button below is not clickable, copy the command above and send it to the Promoter's Telegram chat.</i>`,
+    `<b>After binding：</b>\n` +
+    `The Bot will show your p_B01 Bot Share Link automatically.\n\n` +
+    `<i>If the link is not clickable, copy the manual command and send it to the Bot.</i>`,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true,

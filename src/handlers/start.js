@@ -85,6 +85,24 @@ async function handleBindToken(ctx, payload, uid) {
         return ctx.reply('Binding failed. Contact Admin.');
       }
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
+      // Notify all Admins: Agent binding completed
+      for (const adminId of config.ADMIN_IDS) {
+        try {
+          await ctx.telegram.sendMessage(adminId,
+            `✅ <b>Agent Binding Completed</b>\n\n` +
+            `Agent Code：<code>${code}</code>\n` +
+            `Telegram ID：<code>${uid}</code>\n` +
+            `Status：<b>Bound</b>`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: { inline_keyboard: [
+                [{ text: '👥 Agent List', callback_data: 'cmd:/list_agents' }],
+                [{ text: '📊 Admin Panel', callback_data: 'cmd:/admin' }],
+              ]}
+            }
+          );
+        } catch (e) { console.error('[Notify Admin] Failed:', e.message); }
+      }
       return ctx.reply(
         `👥 <b>Agent Bound Successfully!</b>\n\n` +
         `Agent Code：<code>${code}</code>\n\n` +
@@ -141,6 +159,25 @@ async function handleBindToken(ctx, payload, uid) {
         return ctx.reply('Binding failed. Contact Admin.');
       }
       await audit.log(uid, 'promoter', 'promoter_bind', 'promoter', code);
+      // Notify Agent: Promoter binding completed
+      const agentTg = await db.query('SELECT a.telegram_id FROM agents a JOIN promoters p ON p.agent_id = a.id WHERE p.promoter_code = $1', [code]);
+      if (agentTg.rows[0]?.telegram_id) {
+        try {
+          await ctx.telegram.sendMessage(agentTg.rows[0].telegram_id,
+            `✅ <b>Promoter Binding Completed</b>\n\n` +
+            `Promoter Code：<code>${code}</code>\n` +
+            `Telegram ID：<code>${uid}</code>\n` +
+            `Status：<b>Bound</b>`,
+            {
+              parse_mode: 'HTML',
+              reply_markup: { inline_keyboard: [
+                [{ text: '📋 My Promoters', callback_data: 'cmd:/list_my_promoters' }],
+                [{ text: '📊 Agent Panel', callback_data: 'cmd:/agent' }],
+              ]}
+            }
+          );
+        } catch (e) { console.error('[Notify Agent] Failed:', e.message); }
+      }
       // Get Promoter's affiliate link + Bot Share Link
       const pmFull = await db.query('SELECT player_affiliate_link_original FROM promoters WHERE promoter_code = $1', [code]);
       const affLink = pmFull.rows[0]?.player_affiliate_link_original || '';

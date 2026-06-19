@@ -137,13 +137,15 @@ async function handleAddAgent(ctx) {
     `Agent Code：<code>${agentCode}</code>\n` +
     `Name：${name}\n\n` +
     `Please bind your Telegram account to this Agent profile.\n\n` +
-    `<b>Bot Binding Link：</b>\n${botLink}\n\n` +
+    `<b>Binding Method：</b>\n\n` +
+    `<b>🆕 New Telegram user：</b>\n` +
+    `Click the <b>Bind Agent</b> button below.\n\n` +
+    `<b>📋 If you have opened this Bot before：</b>\n` +
+    `Copy and send the Manual command below to the Bot.\n\n` +
     `<b>Manual command：</b>\n<code>${manualCmd}</code>\n\n` +
+    `Bot Binding Link：\n${botLink}\n\n` +
     `⚠️ One-time identity binding link. Valid 72h.\n` +
-    `Do not share in groups. Invalid after use.\n\n` +
-    `<b>After binding：</b>\n` +
-    `The Bot will show Add Promoter button automatically.\n\n` +
-    `<i>If the link is not clickable, copy the manual command and send it to the Bot.</i>`,
+    `Do not share in groups. Invalid after use.`,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true,

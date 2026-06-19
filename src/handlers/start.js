@@ -48,6 +48,19 @@ async function handleBindToken(ctx, payload, uid) {
     }
     const { type, code } = result;
     if (type === 'agent_bind') {
+      // Check if this TG is already bound to ANY agent (cross-agent check)
+      const existingBinding = await db.query(
+        'SELECT agent_code FROM agents WHERE telegram_id = $1', [uid]
+      );
+      if (existingBinding.rows.length > 0) {
+        return ctx.reply(
+          `⚠️ Your Telegram account is already bound to Agent <code>${existingBinding.rows[0].agent_code}</code>.\n\n` +
+          `One Telegram account can only be bound to one Agent.\n` +
+          `Please use a different Telegram account or contact Admin.`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
       // Check agent record and prevent overwriting another user's binding
       const agentRec = await db.query(
         'SELECT id, telegram_id, status, approval_status FROM agents WHERE agent_code = $1', [code]
@@ -121,6 +134,19 @@ async function handleBindToken(ctx, payload, uid) {
       );
     }
     if (type === 'promoter_bind') {
+      // Check if this TG is already bound to ANY promoter (cross-promoter check)
+      const existingPmBinding = await db.query(
+        'SELECT promoter_code FROM promoters WHERE telegram_id = $1', [uid]
+      );
+      if (existingPmBinding.rows.length > 0) {
+        return ctx.reply(
+          `⚠️ Your Telegram account is already bound to Promoter <code>${existingPmBinding.rows[0].promoter_code}</code>.\n\n` +
+          `One Telegram account can only be bound to one Promoter.\n` +
+          `Please use a different Telegram account or contact Agent.`,
+          { parse_mode: 'HTML' }
+        );
+      }
+
       // Check promoter record and prevent overwriting another user's binding
       const pmRec = await db.query(
         'SELECT id, telegram_id, status, agent_id FROM promoters WHERE promoter_code = $1', [code]

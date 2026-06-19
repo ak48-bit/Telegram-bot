@@ -63,14 +63,19 @@ async function handleBindToken(ctx, payload, uid) {
       }
       // If already bound to this uid, show panel directly
       if (boundTg === curTg) {
-        const { cmdButtons } = require('../services/cmdButtons');
         return ctx.reply(
-          `👥 <b>Agent Already Bound</b>\n\nAgent Code：<code>${code}</code>`,
-          { parse_mode: 'HTML', reply_markup: cmdButtons([
-            ['/agent', '📊 Agent Panel'], ['/set_agent_link', '🔗 Set Agent Link'],
-            ['/add_promoter', '➕ Add Promoter'], ['/list_my_promoters', '👥 My Promoters'],
-            ['/list_my_players', '🎮 My Players'], ['/my_agent_link', '📋 My Link'],
-          ])}
+          `👥 <b>Agent Already Bound</b>\n\nAgent Code：<code>${code}</code>\n\n` +
+          `<b>Next Step：</b>\n` +
+          `Create Promoter and submit:\n` +
+          `• Promoter Code\n• Promoter Name\n• Affiliate Link`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: [
+              [{ text: '➕ Add Promoter', callback_data: 'cmd:/add_promoter' }],
+              [{ text: '👥 My Promoters', callback_data: 'cmd:/list_my_promoters' }, { text: '🎮 My Players', callback_data: 'cmd:/list_my_players' }],
+              [{ text: '📊 Agent Panel', callback_data: 'cmd:/agent' }],
+            ]}
+          }
         );
       }
       const updUser = await db.query(`UPDATE users SET role = 'agent', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
@@ -80,19 +85,20 @@ async function handleBindToken(ctx, payload, uid) {
         return ctx.reply('Binding failed. Contact Admin.');
       }
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
-      const { cmdButtons } = require('../services/cmdButtons');
       return ctx.reply(
-        `👥 <b>Agent Bound Successfully!</b>\n\nAgent Code：<code>${code}</code>`,
+        `👥 <b>Agent Bound Successfully!</b>\n\n` +
+        `Agent Code：<code>${code}</code>\n\n` +
+        `<b>Next Step：</b>\n` +
+        `Create Promoter and submit:\n` +
+        `• Promoter Code\n• Promoter Name\n• Affiliate Link\n\n` +
+        `Use the buttons below to continue.`,
         {
           parse_mode: 'HTML',
-          reply_markup: cmdButtons([
-            ['/agent', '📊 Agent Panel'],
-            ['/set_agent_link', '🔗 Set Agent Link'],
-            ['/add_promoter', '➕ Add Promoter'],
-            ['/list_my_promoters', '👥 My Promoters'],
-            ['/list_my_players', '🎮 My Players'],
-            ['/my_agent_link', '📋 My Link'],
-          ])
+          reply_markup: { inline_keyboard: [
+            [{ text: '➕ Add Promoter', callback_data: 'cmd:/add_promoter' }],
+            [{ text: '👥 My Promoters', callback_data: 'cmd:/list_my_promoters' }, { text: '🎮 My Players', callback_data: 'cmd:/list_my_players' }],
+            [{ text: '📊 Agent Panel', callback_data: 'cmd:/agent' }],
+          ]}
         }
       );
     }
@@ -114,8 +120,18 @@ async function handleBindToken(ctx, payload, uid) {
       const agInfo = await db.query('SELECT agent_code FROM agents WHERE id = $1', [pmRec.rows[0].agent_id]);
       if (boundPmTg === curPmTg) {
         return ctx.reply(
-          `📢 <b>Promoter Already Bound</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\nCommands：/promoter | /my_link | /my_players | /share`,
-          { parse_mode: 'HTML' }
+          `📢 <b>Promoter Already Bound</b>\n\n` +
+          `Promoter Code：<code>${code}</code>\n` +
+          `Assigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\n` +
+          `Bot Share Link：\nhttps://t.me/${BOT_USERNAME}?start=p_B01_${code}\n\n` +
+          `<b>Next Step：</b> Send the Bot Share Link to players.`,
+          {
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: [
+              [{ text: '📣 Share', callback_data: 'cmd:/share' }, { text: '🔗 My Links', callback_data: 'cmd:/my_link' }],
+              [{ text: '🎮 My Players', callback_data: 'cmd:/my_players' }, { text: '📅 Today', callback_data: 'cmd:/my_today' }],
+            ]}
+          }
         );
       }
       await db.query(`UPDATE users SET role = 'promoter', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
@@ -125,10 +141,23 @@ async function handleBindToken(ctx, payload, uid) {
         return ctx.reply('Binding failed. Contact Admin.');
       }
       await audit.log(uid, 'promoter', 'promoter_bind', 'promoter', code);
-      return ctx.reply(
-        `📢 <b>Promoter Bound Successfully!</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\nYour Promoter link has been set by your Agent.\nYou can now use /share to get your sharing message.\n\nCommands：/promoter | /my_link | /my_players | /share`,
-        { parse_mode: 'HTML' }
-      );
+      // Get Promoter's affiliate link + Bot Share Link
+      const pmFull = await db.query('SELECT player_affiliate_link_original FROM promoters WHERE promoter_code = $1', [code]);
+      const affLink = pmFull.rows[0]?.player_affiliate_link_original || '';
+      const botShareLink = `https://t.me/${BOT_USERNAME}?start=p_B01_${code}`;
+      let msg = `📢 <b>Promoter Bound Successfully!</b>\n\n` +
+        `Promoter Code：<code>${code}</code>\n` +
+        `Assigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\n`;
+      if (affLink) msg += `Player Affiliate Link：\n${affLink}\n\n`;
+      msg += `Bot Share Link：\n${botShareLink}\n\n` +
+        `<b>Next Step：</b> Send the Bot Share Link to players.`;
+      return ctx.reply(msg, {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📣 Share', callback_data: 'cmd:/share' }, { text: '🔗 My Links', callback_data: 'cmd:/my_link' }],
+          [{ text: '🎮 My Players', callback_data: 'cmd:/my_players' }, { text: '📅 Today', callback_data: 'cmd:/my_today' }],
+        ]}
+      });
     }
   } catch (e) {
     console.error('[BindToken]', e);

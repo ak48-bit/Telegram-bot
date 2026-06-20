@@ -1,4 +1,4 @@
-# PH90 WFH Bot — Telegram Referral Tracking Bot
+# PH90 WFH Bot v1.2 — Telegram Referral Tracking Bot
 
 ## Architecture
 

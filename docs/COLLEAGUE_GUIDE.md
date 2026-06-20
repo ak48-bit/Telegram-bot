@@ -4,13 +4,30 @@
 
 ---
 
-## v1.2 简化流程（重点）
+## v1.2 最终操作流程
 
-1. **Agent 绑定后** → 不需要记命令，直接点 `[Add Promoter]` 按钮
-2. **Promoter 绑定后** → Bot 直接显示 `p_B01_xxx` 短链接，不需要找
-3. **Promoter** → 直接点 `[Share]` 发给玩家
-4. **Player** → 通过 `p_B01` 进入后点 `[Submit Game ID]`
-5. 常用操作优先按钮，高风险和带参数操作仍保留 `/命令`
+### Admin
+1. `/add_agent AgentCode Name`
+2. 收到两张卡片 — 把 **Agent Binding Card** 转发给 Agent
+
+### Agent
+1. 收到 Agent Binding Card
+2. **新用户**：点 `Bind Agent` 按钮 | **旧用户**：复制 Manual command 发送给 Bot
+3. 绑定成功后，点 `[Add Promoter]` 按钮创建 Promoter
+4. 把 **Promoter Binding Card** 转发给 Promoter
+
+### Promoter
+1. 收到 Promoter Binding Card
+2. **新用户**：点 `Bind Promoter` 按钮 | **旧用户**：复制 Manual command 发送给 Bot
+3. 绑定成功后，Bot 直接显示 `p_B01_xxx` 短链接
+4. 点 `[Share]` 把 Bot Share Link 发给玩家
+
+### Player
+1. 点击 `p_B01_xxx` 链接进入 Bot
+2. 点 `[Submit Game ID]` 提交
+3. 点 `[Share Bot Link]` 分享活动
+
+> 常用操作优先按钮，高风险和带参数操作仍保留 `/命令`
 
 ---
 

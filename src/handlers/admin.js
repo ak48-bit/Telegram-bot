@@ -93,6 +93,19 @@ async function handleAddAgent(ctx) {
   const agentCode = parts[1];
   const name = parts.slice(2).join(' ');
 
+  // Validate Agent Code format
+  if (!config.AGENT_CODE_REGEX.test(agentCode)) {
+    return ctx.reply('Invalid Agent Code format.\nAllowed: 3-20 characters, letters, numbers, underscore, hyphen only.\nExample: /add_agent TestA01 TestAgent', { parse_mode: 'HTML' });
+  }
+  const reservedLower = config.RESERVED_AGENT_CODES.map(c => c.toLowerCase());
+  if (reservedLower.includes(agentCode.toLowerCase())) {
+    return ctx.reply('Invalid Agent Code format.\nThis code is reserved. Please choose a different one.', { parse_mode: 'HTML' });
+  }
+  // Validate Agent Name format
+  if (!name || name.length < 2 || name.length > 30) {
+    return ctx.reply('Invalid Agent Name format.\n2-30 characters required.\nExample: /add_agent TestA01 TestAgent', { parse_mode: 'HTML' });
+  }
+
   // 检查 code 唯一
   const exists = await db.query('SELECT 1 FROM agents WHERE agent_code = $1', [agentCode]);
   if (exists.rows.length > 0) {

@@ -1,5 +1,5 @@
 const db = require('../db');
-const { useInviteToken } = require('../services/token');
+// Token validation now done inline in handleBindToken (transactional)
 const audit = require('../services/audit');
 const config = require('../config');
 
@@ -33,69 +33,86 @@ async function handleBindToken(ctx, payload, uid) {
   const token = payload.replace(/^(bind_agent_|bind_promoter_)/, '');
   const expectedType = payload.startsWith('bind_agent_') ? 'agent_bind' : 'promoter_bind';
   try {
-    const result = await useInviteToken(token, uid, expectedType);
-    if (!result || !result.type) {
-      if (result?.reason === 'used') {
-        return ctx.reply('⚠️ This binding link has already been used.\n\nBinding links are one-time use only.\nContact your upline for a new link.');
-      }
-      if (result?.reason === 'expired') {
-        return ctx.reply('⚠️ This binding link has expired.\n\nContact your upline for a new link.');
-      }
-      if (result?.reason === 'type_mismatch') {
-        return ctx.reply('⚠️ This binding link is invalid.\n\nContact your upline for a new link.');
-      }
+    // Validate token WITHOUT marking used (validation only)
+    const crypto = require('crypto');
+    const hash = crypto.createHash('sha256').update(token).digest('hex');
+    const tokenCheck = await db.query(
+      'SELECT type, code, is_used, expires_at FROM invite_tokens WHERE token_hash = $1 AND type = $2', [hash, expectedType]
+    );
+    if (tokenCheck.rows.length === 0) {
+      // Check why
+      const anyHash = await db.query('SELECT is_used, type, expires_at FROM invite_tokens WHERE token_hash = $1', [hash]);
+      if (anyHash.rows.length === 0) return ctx.reply('⚠️ This binding link is invalid.\n\nContact your upline for a new link.');
+      const r = anyHash.rows[0];
+      if (r.is_used) return ctx.reply('⚠️ This binding link has already been used.\n\nBinding links are one-time use only.\nContact your upline for a new link.');
+      if (new Date(r.expires_at) <= new Date()) return ctx.reply('⚠️ This binding link has expired.\n\nContact your upline for a new link.');
       return ctx.reply('⚠️ This binding link is invalid.\n\nContact your upline for a new link.');
     }
-    const { type, code } = result;
+    const { type, code } = tokenCheck.rows[0];
     if (type === 'agent_bind') {
-      // Check if this TG is already bound to ANY agent (cross-agent check)
-      const existingBinding = await db.query(
-        'SELECT agent_code FROM agents WHERE telegram_id = $1', [uid]
-      );
-      if (existingBinding.rows.length > 0) {
-        return ctx.reply(
-          `⚠️ Your Telegram account is already bound to Agent <code>${existingBinding.rows[0].agent_code}</code>.\n\n` +
-          `One Telegram account can only be bound to one Agent.\n` +
-          `Please use a different Telegram account or contact Admin.`,
-          { parse_mode: 'HTML' }
-        );
-      }
+      // Agent binding transaction: validate → bind → mark token used, all-or-nothing
+      const client = await db.pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      // Check agent record and prevent overwriting another user's binding
-      const agentRec = await db.query(
-        'SELECT id, telegram_id, status, approval_status FROM agents WHERE agent_code = $1', [code]
-      );
-      if (agentRec.rows.length === 0) {
-        return ctx.reply('Agent record not found.');
-      }
-      const boundTg = agentRec.rows[0].telegram_id ? String(agentRec.rows[0].telegram_id) : null;
-      const curTg = String(uid);
-      if (boundTg && boundTg !== curTg) {
-        await audit.log(uid, 'agent', 'agent_bind_already_bound', 'agent', code);
-        return ctx.reply('This Agent account is already bound. Contact Admin.');
-      }
-      // If already bound to this uid, show panel directly
-      if (boundTg === curTg) {
-        return ctx.reply(
-          `👥 <b>Agent Already Bound</b>\n\nAgent Code：<code>${code}</code>\n\n` +
-          `<b>Next Step：</b>\n` +
-          `Create Promoter and submit:\n` +
-          `• Promoter Code\n• Promoter Name\n• Affiliate Link`,
-          {
-            parse_mode: 'HTML',
-            reply_markup: { inline_keyboard: [
+        // Check if this TG is already bound to ANY agent
+        const existingBinding = await client.query('SELECT agent_code FROM agents WHERE telegram_id = $1', [uid]);
+        if (existingBinding.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return ctx.reply(
+            `⚠️ Your Telegram account is already bound to Agent <code>${existingBinding.rows[0].agent_code}</code>.\n\n` +
+            `One Telegram account can only be bound to one Agent.\nPlease use a different Telegram account or contact Admin.`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        // Check agent record
+        const agentRec = await client.query('SELECT id, telegram_id, status, approval_status FROM agents WHERE agent_code = $1 FOR UPDATE', [code]);
+        if (agentRec.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return ctx.reply('Agent record not found.');
+        }
+        const boundTg = agentRec.rows[0].telegram_id ? String(agentRec.rows[0].telegram_id) : null;
+        const curTg = String(uid);
+        if (boundTg && boundTg !== curTg) {
+          await client.query('ROLLBACK');
+          await audit.log(uid, 'agent', 'agent_bind_already_bound', 'agent', code);
+          return ctx.reply('This Agent account is already bound. Contact Admin.');
+        }
+
+        // If already bound, show panel
+        if (boundTg === curTg) {
+          await client.query('ROLLBACK');
+          return ctx.reply(
+            `👥 <b>Agent Already Bound</b>\n\nAgent Code：<code>${code}</code>\n\n` +
+            `<b>Next Step：</b>\nCreate Promoter and submit:\n• Promoter Code\n• Promoter Name\n• Affiliate Link`,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: [
               [{ text: '➕ Add Promoter', callback_data: 'cmd:/add_promoter' }],
               [{ text: '👥 My Promoters', callback_data: 'cmd:/list_my_promoters' }, { text: '🎮 My Players', callback_data: 'cmd:/list_my_players' }],
               [{ text: '📊 Agent Panel', callback_data: 'cmd:/agent' }],
-            ]}
-          }
-        );
-      }
-      const updUser = await db.query(`UPDATE users SET role = 'agent', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
-      const updAgent = await db.query(`UPDATE agents SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE agent_code = $2 AND (telegram_id IS NULL OR telegram_id = $1)`, [uid, code]);
-      if (updAgent.rowCount === 0) {
-        await audit.log(uid, 'agent', 'agent_bind_failed', 'agent', code);
-        return ctx.reply('Binding failed. Contact Admin.');
+            ]}}
+          );
+        }
+
+        // Bind: update users + agents in one transaction
+        await client.query("UPDATE users SET role = 'agent', status = 'active', updated_at = NOW() WHERE telegram_id = $1", [uid]);
+        const updAgent = await client.query("UPDATE agents SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE agent_code = $2 AND (telegram_id IS NULL OR telegram_id = $1)", [uid, code]);
+        if (updAgent.rowCount === 0) {
+          await client.query('ROLLBACK');
+          await audit.log(uid, 'agent', 'agent_bind_failed', 'agent', code);
+          return ctx.reply('Binding failed. Contact Admin.');
+        }
+
+        // Mark token used AFTER successful binding
+        const hash = require('crypto').createHash('sha256').update(token).digest('hex');
+        await client.query("UPDATE invite_tokens SET is_used = TRUE, used_by_telegram_id = $1, used_at = NOW() WHERE token_hash = $2 AND is_used = FALSE", [uid, hash]);
+
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
       }
       await audit.log(uid, 'agent', 'agent_bind', 'agent', code);
       // Notify all Admins: Agent binding completed
@@ -134,55 +151,68 @@ async function handleBindToken(ctx, payload, uid) {
       );
     }
     if (type === 'promoter_bind') {
-      // Check if this TG is already bound to ANY promoter (cross-promoter check)
-      const existingPmBinding = await db.query(
-        'SELECT promoter_code FROM promoters WHERE telegram_id = $1', [uid]
-      );
-      if (existingPmBinding.rows.length > 0) {
-        return ctx.reply(
-          `⚠️ Your Telegram account is already bound to Promoter <code>${existingPmBinding.rows[0].promoter_code}</code>.\n\n` +
-          `One Telegram account can only be bound to one Promoter.\n` +
-          `Please use a different Telegram account or contact Agent.`,
-          { parse_mode: 'HTML' }
-        );
-      }
+      // Promoter binding transaction: validate → bind → mark token used, all-or-nothing
+      const client = await db.pool.connect();
+      try {
+        await client.query('BEGIN');
 
-      // Check promoter record and prevent overwriting another user's binding
-      const pmRec = await db.query(
-        'SELECT id, telegram_id, status, agent_id FROM promoters WHERE promoter_code = $1', [code]
-      );
-      if (pmRec.rows.length === 0) {
-        return ctx.reply('Promoter record not found.');
-      }
-      const boundPmTg = pmRec.rows[0].telegram_id ? String(pmRec.rows[0].telegram_id) : null;
-      const curPmTg = String(uid);
-      if (boundPmTg && boundPmTg !== curPmTg) {
-        await audit.log(uid, 'promoter', 'promoter_bind_already_bound', 'promoter', code);
-        return ctx.reply('This Promoter account is already bound. Contact Agent.');
-      }
-      // Get agent_code for display
-      const agInfo = await db.query('SELECT agent_code FROM agents WHERE id = $1', [pmRec.rows[0].agent_id]);
-      if (boundPmTg === curPmTg) {
-        return ctx.reply(
-          `📢 <b>Promoter Already Bound</b>\n\n` +
-          `Promoter Code：<code>${code}</code>\n` +
-          `Assigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\n` +
-          `Bot Share Link：\nhttps://t.me/${BOT_USERNAME}?start=p_B01_${code}\n\n` +
-          `<b>Next Step：</b> Send the Bot Share Link to players.`,
-          {
-            parse_mode: 'HTML',
-            reply_markup: { inline_keyboard: [
+        // Check if this TG is already bound to ANY promoter
+        const existingPmBinding = await client.query('SELECT promoter_code FROM promoters WHERE telegram_id = $1', [uid]);
+        if (existingPmBinding.rows.length > 0) {
+          await client.query('ROLLBACK');
+          return ctx.reply(
+            `⚠️ Your Telegram account is already bound to Promoter <code>${existingPmBinding.rows[0].promoter_code}</code>.\n\n` +
+            `One Telegram account can only be bound to one Promoter.\nPlease use a different Telegram account or contact Agent.`,
+            { parse_mode: 'HTML' }
+          );
+        }
+
+        // Check promoter record
+        const pmRec = await client.query('SELECT id, telegram_id, status, agent_id FROM promoters WHERE promoter_code = $1 FOR UPDATE', [code]);
+        if (pmRec.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return ctx.reply('Promoter record not found.');
+        }
+        const boundPmTg = pmRec.rows[0].telegram_id ? String(pmRec.rows[0].telegram_id) : null;
+        const curPmTg = String(uid);
+        if (boundPmTg && boundPmTg !== curPmTg) {
+          await client.query('ROLLBACK');
+          await audit.log(uid, 'promoter', 'promoter_bind_already_bound', 'promoter', code);
+          return ctx.reply('This Promoter account is already bound. Contact Agent.');
+        }
+
+        // Get agent_code for display
+        const agInfo = await client.query('SELECT agent_code FROM agents WHERE id = $1', [pmRec.rows[0].agent_id]);
+        if (boundPmTg === curPmTg) {
+          await client.query('ROLLBACK');
+          return ctx.reply(
+            `📢 <b>Promoter Already Bound</b>\n\nPromoter Code：<code>${code}</code>\nAssigned Agent：${agInfo.rows[0]?.agent_code || '-'}\n\n` +
+            `Bot Share Link：\nhttps://t.me/${BOT_USERNAME}?start=p_B01_${code}\n\n<b>Next Step：</b> Send the Bot Share Link to players.`,
+            { parse_mode: 'HTML', reply_markup: { inline_keyboard: [
               [{ text: '📣 Share', callback_data: 'cmd:/share' }, { text: '🔗 My Links', callback_data: 'cmd:/my_link' }],
               [{ text: '🎮 My Players', callback_data: 'cmd:/my_players' }, { text: '📅 Today', callback_data: 'cmd:/my_today' }],
-            ]}
-          }
-        );
-      }
-      await db.query(`UPDATE users SET role = 'promoter', status = 'active', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
-      const updPm = await db.query(`UPDATE promoters SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE promoter_code = $2 AND (telegram_id IS NULL OR telegram_id = $1)`, [uid, code]);
-      if (updPm.rowCount === 0) {
-        await audit.log(uid, 'promoter', 'promoter_bind_failed', 'promoter', code);
-        return ctx.reply('Binding failed. Contact Admin.');
+            ]}}
+          );
+        }
+
+        // Bind in transaction
+        await client.query("UPDATE users SET role = 'promoter', status = 'active', updated_at = NOW() WHERE telegram_id = $1", [uid]);
+        const updPm = await client.query("UPDATE promoters SET telegram_id = $1, status = 'active', updated_at = NOW() WHERE promoter_code = $2 AND (telegram_id IS NULL OR telegram_id = $1)", [uid, code]);
+        if (updPm.rowCount === 0) {
+          await client.query('ROLLBACK');
+          await audit.log(uid, 'promoter', 'promoter_bind_failed', 'promoter', code);
+          return ctx.reply('Binding failed. Contact Admin.');
+        }
+
+        // Mark token used AFTER successful binding
+        await client.query("UPDATE invite_tokens SET is_used = TRUE, used_by_telegram_id = $1, used_at = NOW() WHERE token_hash = $2 AND is_used = FALSE", [uid, hash]);
+
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
       }
       await audit.log(uid, 'promoter', 'promoter_bind', 'promoter', code);
       // Notify Agent: Promoter binding completed
@@ -345,6 +375,14 @@ async function handleShortLink(ctx, payload, uid) {
 }
 
 async function handlePlayerBindShort(ctx, uid, promoter) {
+  // Prevent Admin/Agent/Promoter from being downgraded to Player
+  const currentUser = await db.query('SELECT role FROM users WHERE telegram_id = $1', [uid]);
+  if (currentUser.rows.length > 0) {
+    const role = currentUser.rows[0].role;
+    if (role === 'admin' || role === 'agent' || role === 'promoter') {
+      return ctx.reply('This account already has a management role and cannot be bound as a player.');
+    }
+  }
   const existing = await db.query('SELECT * FROM players WHERE telegram_id = $1', [uid]);
   if (existing.rows.length > 0) {
     const oldPm = await db.query('SELECT promoter_code FROM promoters WHERE id = $1', [existing.rows[0].promoter_id]);

@@ -79,6 +79,7 @@ async function handleBindToken(ctx, payload, uid) {
   if (expectedType === 'promoter_bind') {
     const client = await db.pool.connect();
     let pmCode;
+    let boundAgentCode = '-';
     try {
       await client.query('BEGIN');
       const tRec = await client.query('SELECT type, code, is_used, expires_at FROM invite_tokens WHERE token_hash = $1 FOR UPDATE', [tokenHash]);
@@ -96,9 +97,10 @@ async function handleBindToken(ctx, payload, uid) {
       const ct = String(uid);
       if (bt && bt !== ct) { await client.query('ROLLBACK'); client.release(); await audit.log(uid,'promoter','promoter_bind_already_bound','promoter',pmCode); return ctx.reply('This Promoter account is already bound.'); }
       const agInfo = await client.query('SELECT agent_code FROM agents WHERE id = $1', [pm.rows[0].agent_id]);
+      boundAgentCode = agInfo.rows[0]?.agent_code || '-';
       if (bt === ct) {
         await client.query('ROLLBACK'); client.release();
-        return ctx.reply('Promoter Already Bound\nCode: ' + pmCode + '\nAgent: ' + (agInfo.rows[0]?.agent_code||'-') + '\n\nBot Share: https://t.me/' + BOT_USERNAME + '?start=p_B01_' + pmCode, { parse_mode:'HTML', reply_markup:{ inline_keyboard:[[{text:'Share',callback_data:'cmd:/share'},{text:'My Links',callback_data:'cmd:/my_link'}],[{text:'My Players',callback_data:'cmd:/my_players'},{text:'Today',callback_data:'cmd:/my_today'}]]}});
+        return ctx.reply('Promoter Already Bound\nCode: ' + pmCode + '\nAgent: ' + boundAgentCode + '\n\nBot Share: https://t.me/' + BOT_USERNAME + '?start=p_B01_' + pmCode, { parse_mode:'HTML', reply_markup:{ inline_keyboard:[[{text:'Share',callback_data:'cmd:/share'},{text:'My Links',callback_data:'cmd:/my_link'}],[{text:'My Players',callback_data:'cmd:/my_players'},{text:'Today',callback_data:'cmd:/my_today'}]]}});
       }
       await client.query("UPDATE users SET role='promoter',status='active',updated_at=NOW() WHERE telegram_id=$1",[uid]);
       const up = await client.query("UPDATE promoters SET telegram_id=$1,status='active',updated_at=NOW() WHERE promoter_code=$2 AND (telegram_id IS NULL OR telegram_id=$1)",[uid,pmCode]);
@@ -116,7 +118,7 @@ async function handleBindToken(ctx, payload, uid) {
     const pmFull = await db.query('SELECT player_affiliate_link_original FROM promoters WHERE promoter_code = $1', [pmCode]);
     const affLink = pmFull.rows[0]?.player_affiliate_link_original || '';
     const botShareLink = 'https://t.me/' + BOT_USERNAME + '?start=p_B01_' + pmCode;
-    let msg = 'Promoter Bound Successfully!\n\nCode: ' + pmCode + '\nAgent: ' + (agInfo.rows[0]?.agent_code||'-') + '\n\n';
+    let msg = 'Promoter Bound Successfully!\n\nCode: ' + pmCode + '\nAgent: ' + boundAgentCode + '\n\n';
     if (affLink) msg += 'Affiliate Link:\n' + affLink + '\n\n';
     msg += 'Bot Share Link:\n' + botShareLink + '\n\nNext Step: Send the Bot Share Link to players.';
     return ctx.reply(msg, { parse_mode:'HTML', reply_markup:{ inline_keyboard:[[{text:'Share',callback_data:'cmd:/share'},{text:'My Links',callback_data:'cmd:/my_link'}],[{text:'My Players',callback_data:'cmd:/my_players'},{text:'Today',callback_data:'cmd:/my_today'}]]}});

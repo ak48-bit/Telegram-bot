@@ -1,3 +1,4 @@
+const { escapeHtml, isUniqueViolation } = require('../services/escapeHtml');
 /**
  * Handles step-by-step input flows using in-memory session.
  * Each command's "old format" handler is called when the step completes.

@@ -1,3 +1,4 @@
+const { escapeHtml, isUniqueViolation } = require('../services/escapeHtml');
 const db = require('../db');
 // Token validation now done inline in handleBindToken (transactional)
 const audit = require('../services/audit');

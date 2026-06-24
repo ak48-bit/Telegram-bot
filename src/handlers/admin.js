@@ -1,3 +1,4 @@
+const { escapeHtml, isUniqueViolation } = require('../services/escapeHtml');
 const db = require('../db');
 const { createInviteToken } = require('../services/token');
 const audit = require('../services/audit');

@@ -1,3 +1,4 @@
+const { escapeHtml, isUniqueViolation } = require('../services/escapeHtml');
 const db = require('../db');
 const audit = require('../services/audit');
 const { validateAndNormalize } = require('../services/normalize');

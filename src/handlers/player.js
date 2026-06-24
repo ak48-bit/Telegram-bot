@@ -1,3 +1,4 @@
+const { escapeHtml, isUniqueViolation } = require('../services/escapeHtml');
 const db = require('../db');
 const audit = require('../services/audit');
 const config = require('../config');
@@ -75,15 +76,22 @@ async function handleSubmit(ctx) {
     return ctx.reply('This Game ID has already been submitted.');
   }
 
-  await db.query(
-    `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted',
-           player_share_code = COALESCE(player_share_code, $2), updated_at = NOW() WHERE telegram_id = $3`,
-    [gameId, gameId, uid]
-  );
+  try {
+    await db.query(
+      `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted',
+             player_share_code = COALESCE(player_share_code, $2), updated_at = NOW() WHERE telegram_id = $3`,
+      [gameId, gameId, uid]
+    );
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      return ctx.reply('This Game ID has already been submitted. Please check and try again.');
+    }
+    throw e;
+  }
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId });
 
   return ctx.reply(
-    `🎮 <b>Game ID Submitted</b>\n\n<code>/submit ${gameId}</code>\n\n✅ Game ID submitted successfully.\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`,
+    `🎮 <b>Game ID Submitted</b>\n\n<code>/submit ${escapeHtml(gameId)}</code>\n\n✅ Game ID submitted successfully.\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`,
     { parse_mode: 'HTML' }
   );
 }
@@ -101,7 +109,7 @@ async function handlePlayerMy(ctx) {
   const statusText = { submitted: 'Submitted ✅', approved: 'Recorded ✅', pending: 'Recorded ✅', rejected: 'Recorded' };
   const st = statusText[p.game_id_status] || 'Not submitted';
   return ctx.reply(
-    `🎮\n\nTelegram：@${ctx.from.username || '-'}\nTelegram ID：<code>${uid}</code>\nGame ID：<code>${p.game_id || 'Not submitted'}</code>\nStatus：${st}\n\n👤 Promoter：${p.promoter_name || '-'} (${p.promoter_code || '-'})`,
+    `🎮\n\nTelegram：@${escapeHtml(ctx.from.username || '-')}\nTelegram ID：<code>${uid}</code>\nGame ID：<code>${escapeHtml(p.game_id || 'Not submitted')}</code>\nStatus：${st}\n\n👤 Promoter：${escapeHtml(p.promoter_name || '-')} (${escapeHtml(p.promoter_code || '-')})`,
     {
       parse_mode: 'HTML',
       reply_markup: { inline_keyboard: [

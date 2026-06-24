@@ -143,11 +143,18 @@ async function handleAddPromoter(ctx) {
   }
 
   // Create promoter with link (link_status = BOUND)
-  await db.query(
-    `INSERT INTO promoters (promoter_code, agent_id, name, created_by_agent_id, created_by_telegram_id, player_affiliate_link_original, player_affiliate_link_normalized, player_referral_token, link_status, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'BOUND','pending')`,
-    [promoterCode, agent.id, name, agent.id, uid, result.original, result.normalized, playerReferralToken]
-  );
+  try {
+    await db.query(
+      `INSERT INTO promoters (promoter_code, agent_id, name, created_by_agent_id, created_by_telegram_id, player_affiliate_link_original, player_affiliate_link_normalized, player_referral_token, link_status, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'BOUND','pending')`,
+      [promoterCode, agent.id, name, agent.id, uid, result.original, result.normalized, playerReferralToken]
+    );
+  } catch (e) {
+    if (require('../services/escapeHtml').isUniqueViolation(e)) {
+      return ctx.reply('This Promoter Code already exists.', { parse_mode: 'HTML' });
+    }
+    throw e;
+  }
 
   const bindToken = await createInviteToken('promoter_bind', promoterCode, uid);
   const botLink = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${bindToken}`;

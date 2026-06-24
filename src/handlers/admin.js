@@ -114,11 +114,18 @@ async function handleAddAgent(ctx) {
   }
 
   // 创建 agent 记录（先不绑定 telegram_id），approval_status = approved
-  await db.query(
-    `INSERT INTO agents (agent_code, name, created_by_admin_id, status, approval_status)
-     VALUES ($1, $2, $3, 'pending', 'approved')`,
-    [agentCode, name, ctx.from.id]
-  );
+  try {
+    await db.query(
+      `INSERT INTO agents (agent_code, name, created_by_admin_id, status, approval_status)
+       VALUES ($1, $2, $3, 'pending', 'approved')`,
+      [agentCode, name, ctx.from.id]
+    );
+  } catch (e) {
+    if (require('../services/escapeHtml').isUniqueViolation(e)) {
+      return ctx.reply('This Agent Code already exists.', { parse_mode: 'HTML' });
+    }
+    throw e;
+  }
 
   // 生成一次性绑定 token
   const token = await createInviteToken('agent_bind', agentCode, ctx.from.id);

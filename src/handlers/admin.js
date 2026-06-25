@@ -32,6 +32,7 @@ async function handleAdmin(ctx) {
     {
       parse_mode: 'HTML',
       reply_markup: { inline_keyboard: [
+        [{ text: '➕ Add Agent', callback_data: 'cmd:/add_agent' }],
         [{ text: '🕓 Pending Agent Apps', callback_data: 'admin_panel_list_agent_apps' }],
         [{ text: '👥 Agent List', callback_data: 'cmd:/list_agents' }, { text: '👤 Promoter List', callback_data: 'cmd:/list_promoters' }],
         [{ text: '🎮 Player List', callback_data: 'cmd:/list_players' }, { text: '🎮 Submitted Game IDs', callback_data: 'cmd:/list_pending' }],

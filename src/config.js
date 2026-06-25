@@ -35,7 +35,7 @@ const config = {
 
   // Command button whitelist — which commands can be triggered via cmd: callback
   CALLBACK_COMMAND_WHITELIST: {
-    admin: ['/admin', '/list_agents', '/list_promoters', '/list_players',
+    admin: ['/admin', '/add_agent', '/list_agents', '/list_promoters', '/list_players',
             '/list_agent_applications', '/list_pending',
             '/system_status', '/audit_recent'],
     agent: ['/agent', '/add_promoter', '/list_my_promoters', '/list_my_players',

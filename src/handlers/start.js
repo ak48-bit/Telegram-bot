@@ -274,21 +274,35 @@ async function handlePlayerBindShort(ctx, uid, promoter) {
 
 // ═══ Plain /start ═══
 async function handlePlainStart(ctx, user) {
-  const texts = {
-    admin: `👑 <b>Admin Panel</b>\n\n/admin — Admin Menu`,
-    agent: `👥 <b>Agent Panel</b>\n\n/agent — View Menu`,
-    promoter: `📢 <b>Promoter Panel</b>\n\n/promoter — View Menu`,
-    player: `🎮 <b>Player Panel</b>`,
-    player_opts: {
-      parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [
-        [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
-        [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
-      ]}
-    },
-  };
-  const opts = texts[user.role + '_opts'] || {};
-  return ctx.reply(texts[user.role] || `🤖 <b>Welcome!</b>\n\nIf you have a referral link, please use it to enter.`, opts);
+  // For players: check if actually bound to a promoter
+  if (user.role === 'player') {
+    const bound = await db.query('SELECT promoter_id FROM players WHERE telegram_id = $1', [ctx.from.id]);
+    if (bound.rows.length > 0) {
+      // Bound player — show Player Panel
+      return ctx.reply(`🎮 <b>Player Panel</b>`, {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+          [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+        ]}
+      });
+    }
+    // Unbound — show general entry help
+    return ctx.reply(
+      `🤖 <b>Welcome to PH90 WFH Bot</b>\n\n` +
+      `Please use the correct entry method:\n\n` +
+      `🔹 <b>Agent</b> — Use your Agent binding link from Admin\n` +
+      `🔹 <b>Promoter</b> — Use your Promoter binding link from Agent\n` +
+      `🔹 <b>Player</b> — Enter through a valid Bot Share Link (p_B01 or p_C001)\n\n` +
+      `<i>If you received a manual command, send it directly to this Bot.</i>`,
+      { parse_mode: 'HTML' }
+    );
+  }
+
+  if (user.role === 'admin') return ctx.reply('👑 <b>Admin Panel</b>\n\n/admin — Admin Menu', { parse_mode: 'HTML' });
+  if (user.role === 'agent') return ctx.reply('👥 <b>Agent Panel</b>\n\n/agent — View Menu', { parse_mode: 'HTML' });
+  if (user.role === 'promoter') return ctx.reply('📢 <b>Promoter Panel</b>\n\n/promoter — View Menu', { parse_mode: 'HTML' });
+  return ctx.reply('🤖 <b>Welcome!</b>\n\nIf you have a referral link, please use it to enter.');
 }
 
 // ═══ Agent Self-Application ═══

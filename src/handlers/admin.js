@@ -167,7 +167,9 @@ async function handleAddAgent(ctx) {
     `<b>Manual command：</b>\n<code>${manualCmd}</code>\n\n` +
     `Bot Binding Link：\n${botLink}\n\n` +
     `⚠️ One-time identity binding link. Valid 72h.\n` +
-    `Do not share in groups. Invalid after use.`,
+    `Do not share in groups. Invalid after use.\n\n` +
+    `<b>⚠️ If Telegram only opens the Bot without binding,</b>\n` +
+    `<b>copy the Manual command above and send it directly to the Bot.</b>`,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
@@ -391,7 +393,8 @@ async function handleRelinkAgent(ctx) {
     `⚠️ Old link invalidated.\n` +
     `⚠️ One-time identity binding link. Valid 72h.\n` +
     `Do not share in groups. Invalid after use.\n\n` +
-    `<i>If the button below is not clickable, copy the command above and send it to the Agent.</i>`,
+    `<b>⚠️ If Telegram only opens the Bot without binding,</b>\n` +
+    `<b>copy the Manual command above and send it directly to the Bot.</b>`,
     {
       parse_mode: 'HTML',
       disable_web_page_preview: true,

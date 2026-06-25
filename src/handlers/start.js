@@ -175,8 +175,24 @@ async function handlePlayerBind(ctx, uid, promoter, payload) {
   if (existing.rows.length > 0) {
     const oldPm = await db.query('SELECT promoter_code FROM promoters WHERE id = $1', [existing.rows[0].promoter_id]);
     await audit.log(uid, 'player', 'player_relink_blocked', 'promoter', oldPm.rows[0]?.promoter_code, { attempted: promoter.promoter_code });
+    const tgUserEx = ctx.from.username ? '@' + ctx.from.username : 'N/A';
+    const gidEx = existing.rows[0].game_id || 'Not Submitted';
+    const gstEx = existing.rows[0].game_id_status === 'submitted' ? 'Submitted ✅' : 'Not Submitted';
     return ctx.reply(
-      `⚠️ You already have a referral source.\n\nCurrent Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\nTo change, contact customer service.`
+      `⚠️ <b>You already have a referral source.</b>\n\n` +
+      `Current Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\n` +
+      `Telegram Username：${tgUserEx}\n` +
+      `Telegram ID：<code>${uid}</code>\n` +
+      `Game ID：<code>${gidEx}</code>\n` +
+      `Status：${gstEx}\n\n` +
+      `To change, contact customer service.`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+          [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+        ]}
+      }
     );
   }
 
@@ -288,8 +304,24 @@ async function handlePlayerBindShort(ctx, uid, promoter) {
   if (existing.rows.length > 0) {
     const oldPm = await db.query('SELECT promoter_code FROM promoters WHERE id = $1', [existing.rows[0].promoter_id]);
     await audit.log(uid, 'player', 'player_relink_blocked', 'promoter', oldPm.rows[0]?.promoter_code, { attempted: promoter.promoter_code });
+    const tgUserEx = ctx.from.username ? '@' + ctx.from.username : 'N/A';
+    const gidEx = existing.rows[0].game_id || 'Not Submitted';
+    const gstEx = existing.rows[0].game_id_status === 'submitted' ? 'Submitted ✅' : 'Not Submitted';
     return ctx.reply(
-      `⚠️ You already have a referral source.\n\nCurrent Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\nTo change, contact customer service.`
+      `⚠️ <b>You already have a referral source.</b>\n\n` +
+      `Current Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\n` +
+      `Telegram Username：${tgUserEx}\n` +
+      `Telegram ID：<code>${uid}</code>\n` +
+      `Game ID：<code>${gidEx}</code>\n` +
+      `Status：${gstEx}\n\n` +
+      `To change, contact customer service.`,
+      {
+        parse_mode: 'HTML',
+        reply_markup: { inline_keyboard: [
+          [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+          [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+        ]}
+      }
     );
   }
   const tgUser2 = ctx.from.username ? '@' + ctx.from.username : null;

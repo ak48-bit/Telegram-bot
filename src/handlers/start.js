@@ -199,7 +199,17 @@ async function handlePlayerBind(ctx, uid, promoter, payload) {
   await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });
 
   return ctx.reply(
-    `🎰 <b>Welcome!</b>\nReferral Source：<code>${promoter.promoter_code}</code>\n\nAvailable Commands：/submit YourGameID | /my | /share`,
+    `🎉 <b>Welcome!</b>\n\nReferral Source：<code>${promoter.promoter_code}</code>\n\n` +
+    `Telegram Username：${ctx.from.username ? '@' + ctx.from.username : 'N/A'}\n` +
+    `Telegram ID：<code>${uid}</code>\n\n` +
+    `<b>Next Step：</b>\nPlease submit your Game ID to join the activity.`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+        [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+      ]}
+    },
     { parse_mode: 'HTML' }
   );
 }
@@ -289,9 +299,20 @@ async function handlePlayerBindShort(ctx, uid, promoter) {
   );
   await db.query(`UPDATE users SET role = 'player', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
   await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });
+  const tgUser = ctx.from.username ? '@' + ctx.from.username : 'N/A';
   return ctx.reply(
-    `🎰 <b>Welcome!</b>\nReferral Source：<code>${promoter.promoter_code}</code>\n\nAvailable Commands：/submit YourGameID | /my | /share`,
-    { parse_mode: 'HTML' }
+    `🎉 <b>Welcome!</b>\n\n` +
+    `Referral Source：<code>${promoter.promoter_code}</code>\n\n` +
+    `Telegram Username：${tgUser}\n` +
+    `Telegram ID：<code>${uid}</code>\n\n` +
+    `<b>Next Step：</b>\nPlease submit your Game ID to join the activity.`,
+    {
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [
+        [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+        [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+      ]}
+    }
   );
 }
 
@@ -301,14 +322,25 @@ async function handlePlainStart(ctx, user) {
   if (user.role === 'player') {
     const bound = await db.query('SELECT promoter_id FROM players WHERE telegram_id = $1', [ctx.from.id]);
     if (bound.rows.length > 0) {
-      // Bound player — show Player Panel
-      return ctx.reply(`🎮 <b>Player Panel</b>`, {
-        parse_mode: 'HTML',
-        reply_markup: { inline_keyboard: [
-          [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
-          [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
-        ]}
-      });
+      // Bound player — show Player Panel with TG info
+      const tgUser = ctx.from.username ? '@' + ctx.from.username : 'N/A';
+      const plInfo = await db.query('SELECT game_id,game_id_status FROM players WHERE telegram_id = $1', [ctx.from.id]);
+      const gid = plInfo.rows[0]?.game_id || 'Not Submitted';
+      const gst = plInfo.rows[0]?.game_id_status === 'submitted' ? 'Submitted ✅' : 'Not Submitted';
+      return ctx.reply(
+        `🎮 <b>Player Panel</b>\n\n` +
+        `Telegram Username：${tgUser}\n` +
+        `Telegram ID：<code>${ctx.from.id}</code>\n` +
+        `Game ID：<code>${gid}</code>\n` +
+        `Status：${gst}`,
+        {
+          parse_mode: 'HTML',
+          reply_markup: { inline_keyboard: [
+            [{ text: '📝 Submit Game ID', callback_data: 'cmd:/submit' }],
+            [{ text: '👤 My Info', callback_data: 'cmd:/my' }, { text: '📣 Share Bot Link', callback_data: 'cmd:/share' }],
+          ]}
+        }
+      );
     }
     // Unbound — show general entry help
     return ctx.reply(

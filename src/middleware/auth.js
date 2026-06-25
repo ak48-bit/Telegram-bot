@@ -9,12 +9,13 @@ async function ensureUser(ctx, next) {
   const { id, username, first_name, last_name } = ctx.from;
   try {
     await db.query(
-      `INSERT INTO users (telegram_id, username, first_name, last_name)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO users (telegram_id, username, first_name, last_name, last_seen_at)
+       VALUES ($1, $2, $3, $4, NOW())
        ON CONFLICT (telegram_id) DO UPDATE SET
          username = COALESCE(EXCLUDED.username, users.username),
          first_name = COALESCE(EXCLUDED.first_name, users.first_name),
          last_name = COALESCE(EXCLUDED.last_name, users.last_name),
+         last_seen_at = NOW(),
          updated_at = NOW()`,
       [id, username, first_name, last_name]
     );

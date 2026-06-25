@@ -49,6 +49,15 @@ async function handleBindToken(ctx, payload, uid) {
       if (t.is_used) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This binding link has already been used.'); }
       if (new Date(t.expires_at) <= new Date()) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This binding link has expired.'); }
       code = t.code;
+      // Role mutex: cannot bind agent if already promoter/player/admin
+      const rc = await client.query('SELECT role FROM users WHERE telegram_id = $1', [uid]);
+      const cr = rc.rows[0]?.role;
+      if (cr === 'admin') { await client.query('ROLLBACK'); client.release(); return ctx.reply('Admin account cannot be bound as Agent.'); }
+      if (cr === 'promoter') { await client.query('ROLLBACK'); client.release(); return ctx.reply('This TG is already bound as Promoter.'); }
+      const pmEx = await client.query('SELECT 1 FROM promoters WHERE telegram_id = $1', [uid]);
+      if (pmEx.rows.length > 0) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This TG is already bound as Promoter.'); }
+      const plEx = await client.query('SELECT 1 FROM players WHERE telegram_id = $1', [uid]);
+      if (plEx.rows.length > 0) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This TG is already bound as Player.'); }
       const ex = await client.query('SELECT agent_code FROM agents WHERE telegram_id = $1', [uid]);
       if (ex.rows.length > 0) { await client.query('ROLLBACK'); client.release(); return ctx.reply('Your TG is already bound to Agent ' + ex.rows[0].agent_code, { parse_mode: 'HTML' }); }
       const ag = await client.query('SELECT id, telegram_id, status FROM agents WHERE agent_code = $1 FOR UPDATE', [code]);
@@ -90,6 +99,15 @@ async function handleBindToken(ctx, payload, uid) {
       if (t.is_used) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This binding link has already been used.'); }
       if (new Date(t.expires_at) <= new Date()) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This binding link has expired.'); }
       pmCode = t.code;
+      // Role mutex: cannot bind promoter if already agent/player/admin
+      const rc2 = await client.query('SELECT role FROM users WHERE telegram_id = $1', [uid]);
+      const cr2 = rc2.rows[0]?.role;
+      if (cr2 === 'admin') { await client.query('ROLLBACK'); client.release(); return ctx.reply('Admin account cannot be bound as Promoter.'); }
+      if (cr2 === 'agent') { await client.query('ROLLBACK'); client.release(); return ctx.reply('This TG is already bound as Agent.'); }
+      const agEx2 = await client.query('SELECT 1 FROM agents WHERE telegram_id = $1', [uid]);
+      if (agEx2.rows.length > 0) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This TG is already bound as Agent.'); }
+      const plEx2 = await client.query('SELECT 1 FROM players WHERE telegram_id = $1', [uid]);
+      if (plEx2.rows.length > 0) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This TG is already bound as Player.'); }
       const ex = await client.query('SELECT promoter_code FROM promoters WHERE telegram_id = $1', [uid]);
       if (ex.rows.length > 0) { await client.query('ROLLBACK'); client.release(); return ctx.reply('Your TG is already bound to Promoter ' + ex.rows[0].promoter_code, { parse_mode: 'HTML' }); }
       const pm = await client.query('SELECT id, telegram_id, status, agent_id FROM promoters WHERE promoter_code = $1 FOR UPDATE', [pmCode]);

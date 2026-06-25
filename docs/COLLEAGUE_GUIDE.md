@@ -1,33 +1,33 @@
 # PH90 WFH Bot — 同事操作简版
 
-> 写给组长、开发员、操作员 | v1.2 | 2026-06-19
+> 写给组长、开发员、操作员 | v1.2.3 | 2026-06-25
 
 ---
 
-## v1.2 最终操作流程
+## v1.2.3 正式操作流程（全部用按钮）
 
 ### Admin
-1. `/add_agent AgentCode Name`
-2. 收到两张卡片 — 把 **Agent Binding Card** 转发给 Agent
+1. `/admin` → 点 `[➕ Add Agent]`
+2. 输入 Agent Code → 输入 Agent Name → 点 `✅ Confirm`
+3. 转发 **Agent Binding Card** 给 Agent
 
 ### Agent
-1. 收到 Agent Binding Card
-2. **新用户**：点 `Bind Agent` 按钮 | **旧用户**：复制 Manual command 发送给 Bot
-3. 绑定成功后，点 `[Add Promoter]` 按钮创建 Promoter
-4. 把 **Promoter Binding Card** 转发给 Promoter
+1. 收到卡片后绑定（新用户点按钮 / 旧用户复制命令发送）
+2. 绑定成功 → 点 `[➕ Add Promoter]`
+3. 输入 Code → Name → Affiliate Link → 点 `✅ Confirm`
+4. 转发 **Promoter Binding Card** 给 Promoter
 
 ### Promoter
-1. 收到 Promoter Binding Card
-2. **新用户**：点 `Bind Promoter` 按钮 | **旧用户**：复制 Manual command 发送给 Bot
-3. 绑定成功后，Bot 直接显示 `p_B01_xxx` 短链接
-4. 点 `[Share]` 把 Bot Share Link 发给玩家
+1. 收到卡片后绑定
+2. 绑定成功 → Bot 自动显示 `p_B01_xxx` 链接 + TG Username + TG ID
+3. 点 `[📣 Share]` 发给玩家
 
 ### Player
-1. 点击 `p_B01_xxx` 链接进入 Bot
-2. 点 `[Submit Game ID]` 提交
-3. 点 `[Share Bot Link]` 分享活动
+1. 点击 `p_B01_xxx` → 显示 TG Username + TG ID + 按钮
+2. 点 `[📝 Submit Game ID]` 提交
+3. 点 `[📣 Share Bot Link]` 分享
 
-> 常用操作优先按钮，高风险和带参数操作仍保留 `/命令`
+> ⚠️ 一个 TG 号只能是一种身份（Admin/Agent/Promoter/Player 互斥）
 
 ---
 

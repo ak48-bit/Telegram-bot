@@ -61,7 +61,7 @@ async function handleBindToken(ctx, payload, uid) {
         return ctx.reply('Agent Already Bound\nCode: ' + code + '\n\nNext Step: Create Promoter', { parse_mode:'HTML', reply_markup:{ inline_keyboard:[[{text:'Add Promoter',callback_data:'cmd:/add_promoter'}],[{text:'Agent Panel',callback_data:'cmd:/agent'}]]}});
       }
       await client.query("UPDATE users SET role='agent',status='active',updated_at=NOW() WHERE telegram_id=$1",[uid]);
-      const ua = await client.query("UPDATE agents SET telegram_id=$1,status='active',updated_at=NOW() WHERE agent_code=$2 AND (telegram_id IS NULL OR telegram_id=$1)",[uid,code]);
+      const ua = await client.query("UPDATE agents SET telegram_id=$1,status='active',username=$2,telegram_first_name=$3,telegram_last_name=$4,updated_at=NOW() WHERE agent_code=$5 AND (telegram_id IS NULL OR telegram_id=$1)",[uid,ctx.from.username||null,ctx.from.first_name||null,ctx.from.last_name||null,code]);
       if (ua.rowCount === 0) { await client.query('ROLLBACK'); client.release(); await audit.log(uid,'agent','agent_bind_failed','agent',code); return ctx.reply('Binding failed.'); }
       const tu = await client.query("UPDATE invite_tokens SET is_used=TRUE,used_by_telegram_id=$1,used_at=NOW() WHERE token_hash=$2 AND is_used=FALSE",[uid,tokenHash]);
       if (tu.rowCount !== 1) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This binding link has already been used.'); }
@@ -103,7 +103,7 @@ async function handleBindToken(ctx, payload, uid) {
         return ctx.reply('Promoter Already Bound\nCode: ' + pmCode + '\nAgent: ' + boundAgentCode + '\n\nBot Share: https://t.me/' + BOT_USERNAME + '?start=p_B01_' + pmCode, { parse_mode:'HTML', reply_markup:{ inline_keyboard:[[{text:'Share',callback_data:'cmd:/share'},{text:'My Links',callback_data:'cmd:/my_link'}],[{text:'My Players',callback_data:'cmd:/my_players'},{text:'Today',callback_data:'cmd:/my_today'}]]}});
       }
       await client.query("UPDATE users SET role='promoter',status='active',updated_at=NOW() WHERE telegram_id=$1",[uid]);
-      const up = await client.query("UPDATE promoters SET telegram_id=$1,status='active',updated_at=NOW() WHERE promoter_code=$2 AND (telegram_id IS NULL OR telegram_id=$1)",[uid,pmCode]);
+      const up = await client.query("UPDATE promoters SET telegram_id=$1,status='active',telegram_username=$2,telegram_first_name=$3,telegram_last_name=$4,updated_at=NOW() WHERE promoter_code=$5 AND (telegram_id IS NULL OR telegram_id=$1)",[uid,ctx.from.username||null,ctx.from.first_name||null,ctx.from.last_name||null,pmCode]);
       if (up.rowCount === 0) { await client.query('ROLLBACK'); client.release(); await audit.log(uid,'promoter','promoter_bind_failed','promoter',pmCode); return ctx.reply('Binding failed.'); }
       const tu = await client.query("UPDATE invite_tokens SET is_used=TRUE,used_by_telegram_id=$1,used_at=NOW() WHERE token_hash=$2 AND is_used=FALSE",[uid,tokenHash]);
       if (tu.rowCount !== 1) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This binding link has already been used.'); }

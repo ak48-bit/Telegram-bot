@@ -159,6 +159,11 @@ async function initDB() {
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS link_status TEXT DEFAULT 'NOT_SUBMITTED'");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS created_by_agent_id BIGINT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS created_by_telegram_id BIGINT");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS telegram_username TEXT");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS telegram_first_name TEXT");
+  await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS telegram_last_name TEXT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS telegram_first_name TEXT");
+  await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS telegram_last_name TEXT");
   // Drop FK on created_by_agent_id if it references users(telegram_id) — we store agents.id now
   await query("ALTER TABLE promoters DROP CONSTRAINT IF EXISTS promoters_created_by_agent_id_fkey").catch(() => {});
   await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS game_id_normalized TEXT");

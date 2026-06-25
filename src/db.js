@@ -160,6 +160,7 @@ async function initDB() {
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS created_by_agent_id BIGINT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS created_by_telegram_id BIGINT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS telegram_username TEXT");
+  await query("ALTER TABLE players ADD COLUMN IF NOT EXISTS telegram_username TEXT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS telegram_first_name TEXT");
   await query("ALTER TABLE promoters ADD COLUMN IF NOT EXISTS telegram_last_name TEXT");
   await query("ALTER TABLE agents ADD COLUMN IF NOT EXISTS telegram_first_name TEXT");

@@ -80,6 +80,7 @@ async function handleBindToken(ctx, payload, uid) {
     const client = await db.pool.connect();
     let pmCode;
     let boundAgentCode = '-';
+    const tgUsername = ctx.from.username ? '@' + ctx.from.username : null;
     try {
       await client.query('BEGIN');
       const tRec = await client.query('SELECT type, code, is_used, expires_at FROM invite_tokens WHERE token_hash = $1 FOR UPDATE', [tokenHash]);
@@ -103,7 +104,7 @@ async function handleBindToken(ctx, payload, uid) {
         return ctx.reply('Promoter Already Bound\nCode: ' + pmCode + '\nAgent: ' + boundAgentCode + '\n\nBot Share: https://t.me/' + BOT_USERNAME + '?start=p_B01_' + pmCode, { parse_mode:'HTML', reply_markup:{ inline_keyboard:[[{text:'Share',callback_data:'cmd:/share'},{text:'My Links',callback_data:'cmd:/my_link'}],[{text:'My Players',callback_data:'cmd:/my_players'},{text:'Today',callback_data:'cmd:/my_today'}]]}});
       }
       await client.query("UPDATE users SET role='promoter',status='active',updated_at=NOW() WHERE telegram_id=$1",[uid]);
-      const up = await client.query("UPDATE promoters SET telegram_id=$1,status='active',telegram_username=$2,telegram_first_name=$3,telegram_last_name=$4,updated_at=NOW() WHERE promoter_code=$5 AND (telegram_id IS NULL OR telegram_id=$1)",[uid,ctx.from.username||null,ctx.from.first_name||null,ctx.from.last_name||null,pmCode]);
+      const up = await client.query("UPDATE promoters SET telegram_id=$1,status='active',telegram_username=$2,updated_at=NOW() WHERE promoter_code=$3 AND (telegram_id IS NULL OR telegram_id=$1)",[uid,tgUsername,pmCode]);
       if (up.rowCount === 0) { await client.query('ROLLBACK'); client.release(); await audit.log(uid,'promoter','promoter_bind_failed','promoter',pmCode); return ctx.reply('Binding failed.'); }
       const tu = await client.query("UPDATE invite_tokens SET is_used=TRUE,used_by_telegram_id=$1,used_at=NOW() WHERE token_hash=$2 AND is_used=FALSE",[uid,tokenHash]);
       if (tu.rowCount !== 1) { await client.query('ROLLBACK'); client.release(); return ctx.reply('This binding link has already been used.'); }
@@ -118,7 +119,9 @@ async function handleBindToken(ctx, payload, uid) {
     const pmFull = await db.query('SELECT player_affiliate_link_original FROM promoters WHERE promoter_code = $1', [pmCode]);
     const affLink = pmFull.rows[0]?.player_affiliate_link_original || '';
     const botShareLink = 'https://t.me/' + BOT_USERNAME + '?start=p_B01_' + pmCode;
-    let msg = 'Promoter Bound Successfully!\n\nCode: ' + pmCode + '\nAgent: ' + boundAgentCode + '\n\n';
+    let msg = 'Promoter Bound Successfully!\n\nCode: ' + pmCode + '\nAgent: ' + boundAgentCode + '\n';
+    msg += 'Telegram Username: ' + (tgUsername || 'N/A') + '\n';
+    msg += 'Telegram ID: ' + uid + '\n\n';
     if (affLink) msg += 'Affiliate Link:\n' + affLink + '\n\n';
     msg += 'Bot Share Link:\n' + botShareLink + '\n\nNext Step: Send the Bot Share Link to players.';
     return ctx.reply(msg, { parse_mode:'HTML', reply_markup:{ inline_keyboard:[[{text:'Share',callback_data:'cmd:/share'},{text:'My Links',callback_data:'cmd:/my_link'}],[{text:'My Players',callback_data:'cmd:/my_players'},{text:'Today',callback_data:'cmd:/my_today'}]]}});
@@ -169,9 +172,10 @@ async function handlePlayerBind(ctx, uid, promoter, payload) {
     }
   }
 
+  const tgUser = ctx.from.username ? '@' + ctx.from.username : null;
   await db.query(
-    `INSERT INTO players (telegram_id, username, first_name, last_name, promoter_id, agent_id, first_start_payload) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [uid, ctx.from.username, ctx.from.first_name, ctx.from.last_name, promoter.id, promoter.agent_id, payload]
+    `INSERT INTO players (telegram_id, telegram_username, username, first_name, last_name, promoter_id, agent_id, first_start_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [uid, tgUser, ctx.from.username, ctx.from.first_name, ctx.from.last_name, promoter.id, promoter.agent_id, payload]
   );
   await db.query(`UPDATE users SET role = 'player', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
   await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });
@@ -260,9 +264,10 @@ async function handlePlayerBindShort(ctx, uid, promoter) {
       `⚠️ You already have a referral source.\n\nCurrent Promoter：<code>${oldPm.rows[0]?.promoter_code || 'N/A'}</code>\n\nTo change, contact customer service.`
     );
   }
+  const tgUser2 = ctx.from.username ? '@' + ctx.from.username : null;
   await db.query(
-    `INSERT INTO players (telegram_id, username, first_name, last_name, promoter_id, agent_id, first_start_payload) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [uid, ctx.from.username, ctx.from.first_name, ctx.from.last_name, promoter.id, promoter.agent_id, 'short_' + promoter.promoter_code]
+    `INSERT INTO players (telegram_id, telegram_username, username, first_name, last_name, promoter_id, agent_id, first_start_payload) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    [uid, tgUser2, ctx.from.username, ctx.from.first_name, ctx.from.last_name, promoter.id, promoter.agent_id, 'short_' + promoter.promoter_code]
   );
   await db.query(`UPDATE users SET role = 'player', updated_at = NOW() WHERE telegram_id = $1`, [uid]);
   await audit.log(uid, 'player', 'player_linked', 'promoter', promoter.promoter_code, { promoter_id: promoter.id, agent_id: promoter.agent_id });

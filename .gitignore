@@ -1,8 +1,20 @@
-﻿# Ignore everything
+# Ignore everything
 *
 
-# Except deployment files
+# Except source and docs
+!backend_client.py
 !webhook_app.py
 !requirements.txt
 !Procfile
 !.gitignore
+!README_RUN.md
+!RENDER_DEPLOY.md
+
+# Explicitly excluded (sensitive / runtime data)
+# .env
+# risk_cases_*.json
+# risk_cases_latest.json
+# sent_risk_cases.json
+# direct_agents_cache.json
+# __pycache__/
+# *.pyc

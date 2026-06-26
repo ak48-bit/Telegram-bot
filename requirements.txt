@@ -1,3 +1,1 @@
-flask==3.1.1
-gunicorn==23.0.0
-psycopg2-binary==2.9.10
+# no external dependencies — backend_client.py uses stdlib only (urllib, json, os, datetime, ssl)

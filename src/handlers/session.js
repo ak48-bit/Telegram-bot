@@ -185,7 +185,7 @@ async function stepCreatePromoterName(ctx, s, text) {
     return ctx.reply('Invalid Promoter Name format.\nPlease use 2-30 characters: letters, numbers, underscore or hyphen only.');
   }
   session.set(ctx.from.id, { ...s, action: 'create_promoter_link', data: { ...s.data, name } });
-  return ctx.reply('Please enter Promoter Affiliate Link:\n\nExample:\nhttps://90jilia2.com/?r=Tom01Link');
+  return ctx.reply('Please enter Promoter Affiliate Link:\n\nExample:\nhttps://ph90invite1.me/register?referralCode=xxxx&affiliateCode=xxxx\n\nRules:\n• Must start with https://\n• Must be a valid safe URL');
 }
 
 async function stepCreatePromoterLink(ctx, s, text) {

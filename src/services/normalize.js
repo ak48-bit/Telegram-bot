@@ -89,45 +89,42 @@ function validateAndNormalize(raw, allowedDomains) {
  * Returns { valid, normalized, original, error }
  */
 function validatePromoterLink(raw, allowedDomains, allowHttp = false) {
-  // Step 1: basic URL validation + domain check
-  const basic = validateAndNormalize(raw, allowedDomains);
-  if (!basic.valid) return basic;
+  if (!raw || typeof raw !== 'string') return { valid: false, error: 'Invalid affiliate link format.' };
+  const url = raw.trim();
 
-  // Step 2: check HTTPS requirement
+  // Step 1: length check
+  if (url.length > 500) return { valid: false, error: 'Invalid affiliate link format.' };
+
+  // Step 2: HTTPS requirement
+  if (!url.startsWith('https://')) {
+    return { valid: false, error: 'Invalid affiliate link format.' };
+  }
+
+  // Step 3: must be parseable by URL()
+  let parsed;
+  try { parsed = new URL(url); } catch { return { valid: false, error: 'Invalid affiliate link format.' }; }
+
+  // Step 4: hostname must not be empty
+  if (!parsed.hostname) return { valid: false, error: 'Invalid affiliate link format.' };
+
+  // Step 5: forbidden content
+  const lower = url.toLowerCase();
+  if (/[\s<>]/.test(url)) return { valid: false, error: 'Invalid affiliate link format.' };
+  if (/javascript:/i.test(lower)) return { valid: false, error: 'Invalid affiliate link format.' };
+  if (/data:/i.test(lower)) return { valid: false, error: 'Invalid affiliate link format.' };
+  if (/[一-鿿]/.test(url)) return { valid: false, error: 'Invalid affiliate link format.' };
+  if (/[\x00-\x1f\x7f]/.test(url)) return { valid: false, error: 'Invalid affiliate link format.' };
+
+  // Step 6: normalized link for dedup (lowercase hostname, remove hash, remove trailing /)
+  let normalized = url;
   try {
-    const u = new URL(basic.original);
-    if (!allowHttp && u.protocol !== 'https:') {
-      return { valid: false, error: 'Invalid affiliate link format.' };
-    }
-  } catch {
-    return { valid: false, error: 'Invalid affiliate link format.' };
-  }
+    const u = new URL(url);
+    u.hostname = u.hostname.toLowerCase();
+    u.hash = '';
+    normalized = u.toString().replace(/\/$/, '');
+  } catch {}
 
-  // Step 3: check r parameter
-  try {
-    const u = new URL(basic.original);
-    const rValues = u.searchParams.getAll('r');
-    if (rValues.length !== 1) {
-      return { valid: false, error: 'Invalid affiliate link format.' };
-    }
-    const rVal = rValues[0];
-    if (rVal.length < 3 || rVal.length > 64) {
-      return { valid: false, error: 'Invalid affiliate link format.' };
-    }
-    if (!/^[A-Za-z0-9_-]+$/.test(rVal)) {
-      return { valid: false, error: 'Invalid affiliate link format.' };
-    }
-  } catch {
-    return { valid: false, error: 'Invalid affiliate link format.' };
-  }
-
-  // Step 4: check for forbidden content in the URL
-  const rawLower = basic.original.toLowerCase();
-  if (/[@\s<>]/.test(basic.original) || /javascript:/i.test(rawLower) || /data:/i.test(rawLower) || /[一-鿿]/.test(basic.original)) {
-    return { valid: false, error: 'Invalid affiliate link format.' };
-  }
-
-  return basic; // { valid: true, normalized, original }
+  return { valid: true, normalized, original: url };
 }
 
 module.exports = { normalizeLink, isDomainAllowed, validateAndNormalize, validatePromoterLink };

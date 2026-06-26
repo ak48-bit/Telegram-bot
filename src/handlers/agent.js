@@ -87,7 +87,7 @@ async function handleAddPromoter(ctx) {
       return ctx.reply('Please enter Promoter Code:');
     }
     return ctx.reply(
-      'Usage:\n/add_promoter <code> <name> <affiliate_link>\n\nExample:\n/add_promoter Tom01 Tom https://90jilia2.com/?r=Tom01Link',
+      'Usage:\n/add_promoter <code> <name> <affiliate_link>\n\nExample:\n/add_promoter Tom01 Tom https://ph90invite1.me/register?referralCode=xxxx&affiliateCode=xxxx',
       { parse_mode: 'HTML' }
     );
   }
@@ -106,7 +106,7 @@ async function handleAddPromoter(ctx) {
   const PROMOTER_NAME_REGEX = /^[A-Za-z0-9_-]{2,30}$/;
   if (!name || !PROMOTER_NAME_REGEX.test(name)) {
     return ctx.reply(
-      'Invalid Promoter Name format.\nPlease use 2-30 characters: letters, numbers, underscore or hyphen only.\n\nUsage:\n/add_promoter <code> <name> <affiliate_link>\n\nExample:\n/add_promoter Tom01 Tom https://90jilia2.com/?r=Tom01Link',
+      'Invalid Promoter Name format.\nPlease use 2-30 characters: letters, numbers, underscore or hyphen only.\n\nUsage:\n/add_promoter <code> <name> <affiliate_link>\n\nExample:\n/add_promoter Tom01 Tom https://ph90invite1.me/register?referralCode=xxxx&affiliateCode=xxxx',
       { parse_mode: 'HTML' }
     );
   }

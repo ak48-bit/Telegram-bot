@@ -124,6 +124,7 @@ class BackendClient:
         """Build the HTTP request headers from .env config."""
         return {
             "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (compatible; IP-Risk-Bot/1.0)",
             "Authorization": self.authorization,
             "Cookie": self.cookie,
             "merchant": self.merchant,
@@ -2072,6 +2073,95 @@ Modes:
             else:
                 status = "SET"
             print(f"  {key:30s}  {status}")
+
+    elif mode == "railway_diagnose":
+        import platform as _plat
+
+        print("=" * 60)
+        print("🔍 Railway 部署诊断")
+        print("=" * 60)
+        print(f"  Python:        {_sys.version}")
+        print(f"  Platform:      {_plat.platform()}")
+        print(f"  CWD:           {os.getcwd()}")
+        print(f"  Start mode:    {mode}")
+        print()
+
+        # ── env_check ──
+        print("── 环境变量 ──")
+        env_keys = [
+            ("BACKEND_BASE_URL",       True),
+            ("BACKEND_AUTHORIZATION",  False),
+            ("BACKEND_COOKIE",         False),
+            ("BACKEND_MERCHANT",       True),
+            ("BACKEND_MERCHANT_CODE",  True),
+            ("BACKEND_ENVIRONMENT",    True),
+            ("BACKEND_PLATFORM",       True),
+            ("BACKEND_LANGUAGE",       True),
+            ("BACKEND_TIMEZONE",       True),
+            ("TOP_AGENT",              True),
+            ("TELEGRAM_BOT_TOKEN",     False),
+            ("TELEGRAM_ALERT_CHAT_ID", True),
+            ("UPTIMEROBOT_HEARTBEAT_URL", True),
+        ]
+        for key, show in env_keys:
+            val = os.environ.get(key, "")
+            if not val:
+                status = "MISSING"
+            elif show:
+                status = f"OK ({val})"
+            else:
+                status = "SET"
+            print(f"  {key:30s}  {status}")
+
+        # ── outbound IP ──
+        print()
+        print("── 出口 IP ──")
+        try:
+            req = urllib.request.Request("https://api.ipify.org")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                ip = resp.read().decode("utf-8").strip()
+            print(f"  Outbound IP:        {ip}")
+            static_ips = ["162.220.232.251", "152.55.176.240", "152.55.177.181"]
+            if ip in static_ips:
+                print(f"  Static IP Match:    ✅ 在 Railway 列表中")
+            else:
+                print(f"  Static IP Match:    ⚠️  不在预期列表中 ({', '.join(static_ips)})")
+        except Exception as e:
+            print(f"  Outbound IP:        FAILED ({e})")
+
+        # ── search URL ──
+        print()
+        print("── API 配置 ──")
+        base = os.environ.get("BACKEND_BASE_URL", "").rstrip("/")
+        search_url = f"{base}/tac/api/relay/post/crm-advanced-search-search"
+        print(f"  BACKEND_BASE_URL:   {base}")
+        print(f"  Search URL:         {search_url}")
+
+        # ── headers (safe) ──
+        print()
+        print("── HTTP Headers (安全预览) ──")
+        hdr = client._build_headers()
+        sensitive = {"authorization", "cookie"}
+        for k, v in sorted(hdr.items()):
+            if k.lower() in sensitive:
+                print(f"  {k:20s}  SET (len={len(v)})")
+            else:
+                print(f"  {k:20s}  {v}")
+
+        # ── files ──
+        print()
+        print("── 本地文件 ──")
+        for fname in ["sent_risk_cases.json", "direct_agents_cache.json",
+                       "risk_cases_latest.json"]:
+            fpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), fname)
+            if os.path.isfile(fpath):
+                size = os.path.getsize(fpath)
+                print(f"  {fname:30s}  EXISTS ({size} bytes)")
+            else:
+                print(f"  {fname:30s}  NOT FOUND")
+
+        print()
+        print("  ✅ 诊断完成 (未请求后台 API / 未发送 Telegram)")
 
     else:
         print(f"Unknown mode: {mode}")

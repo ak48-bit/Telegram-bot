@@ -9,6 +9,8 @@
 !.gitignore
 !README_RUN.md
 !RENDER_DEPLOY.md
+!RAILWAY_DEPLOY.md
+!railway.json
 
 # Explicitly excluded (sensitive / runtime data)
 # .env

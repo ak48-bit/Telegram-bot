@@ -1975,6 +1975,8 @@ Modes:
   today_scheduler_test 5 runs × 60s interval (auto-stop)
   scheduler_test       3 runs × 300s interval (full 10-page scan)
   debug_chat           Print Telegram getUpdates to find correct chat_id
+  env_check            Check required environment variables (safe, no values printed)
+  outbound_ip          Print current server outbound IP (api.ipify.org)
 """.strip()
 
     client = BackendClient()
@@ -2035,6 +2037,41 @@ Modes:
         print(f"  Base URL:      {client.base_url}")
         print(f"  TOP_AGENT:     {client.top_agent}")
         client.run_scheduler_test(interval_seconds=300, max_runs=3)
+
+    elif mode == "outbound_ip":
+        try:
+            req = urllib.request.Request("https://api.ipify.org")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                ip = resp.read().decode("utf-8").strip()
+            print(f"Current outbound IP: {ip}")
+        except Exception as e:
+            print(f"Failed to get outbound IP: {e}")
+
+    elif mode == "env_check":
+        checks = [
+            ("BACKEND_BASE_URL",       True),
+            ("BACKEND_AUTHORIZATION",  False),
+            ("BACKEND_COOKIE",         False),
+            ("BACKEND_MERCHANT",       True),
+            ("BACKEND_MERCHANT_CODE",  True),
+            ("BACKEND_ENVIRONMENT",    True),
+            ("BACKEND_PLATFORM",       True),
+            ("BACKEND_LANGUAGE",       True),
+            ("BACKEND_TIMEZONE",       True),
+            ("TOP_AGENT",              True),
+            ("TELEGRAM_BOT_TOKEN",     False),
+            ("TELEGRAM_ALERT_CHAT_ID", True),
+            ("UPTIMEROBOT_HEARTBEAT_URL", True),
+        ]
+        for key, show_value in checks:
+            val = os.environ.get(key, "")
+            if not val:
+                status = "MISSING"
+            elif show_value:
+                status = f"OK ({val})"
+            else:
+                status = "SET"
+            print(f"  {key:30s}  {status}")
 
     else:
         print(f"Unknown mode: {mode}")

@@ -83,6 +83,9 @@ class BackendClient:
         "firstDepositDate",
         "lastLoginIp",
         "lastLoginTime",
+        "lastDevice",
+        "phoneActiveFlag",
+        "bankCardActiveFlag",
     ]
 
     # Map our canonical field name → possible API field names
@@ -766,6 +769,27 @@ class BackendClient:
                         same_ip_players.append(sp)
                         seen_pids.add(spid)
 
+            # ── Enrichment: device/mobile/bank/withdraw snapshots ──
+            enrichment = {
+                "same_device":           None,
+                "same_mobile":           None,
+                "same_bank_card":        None,
+                "same_withdraw_info":    None,
+                "same_payment_account":  None,
+                "device_snapshot":       [
+                    {"role": "player", "customerName": player.get("customerName"),
+                     "lastDevice": player.get("lastDevice")},
+                    {"role": "agent",  "customerName": agent.get("customerName"),
+                     "lastDevice": agent.get("lastDevice")},
+                ],
+                "mobile_snapshot":       [],
+                "bank_snapshot":         [],
+                "withdraw_snapshot":     [],
+                "notes": [
+                    "当前缺少手机/银行卡/提款信息接口, 需后续通过F12抓取对应API",
+                ],
+            }
+
             risk_cases.append({
                 "risk_level":              risk_level,
                 "risk_types":              risk_types,
@@ -784,6 +808,7 @@ class BackendClient:
                 "agent_last_login_time":   agent.get("lastLoginTime"),
                 "same_ip_players":         same_ip_players,
                 "same_ip_player_count":    len(same_ip_players),
+                "enrichment":              enrichment,
                 "created_at":              datetime.now(timezone.utc).isoformat(),
             })
 
@@ -810,6 +835,14 @@ class BackendClient:
             "agent_last_login_time": agent.get("lastLoginTime"),
             "matched_ip":            matched_ip,
             "reason":                reason,
+            "enrichment": {
+                "same_device": None, "same_mobile": None,
+                "same_bank_card": None, "same_withdraw_info": None,
+                "same_payment_account": None,
+                "device_snapshot": [], "mobile_snapshot": [],
+                "bank_snapshot": [], "withdraw_snapshot": [],
+                "notes": ["缺少手机/银行卡/提款接口"],
+            },
             "created_at":            datetime.now(timezone.utc).isoformat(),
         }
 
@@ -907,6 +940,8 @@ class BackendClient:
         print(f"\n{'='*70}")
         print(f"🚨 IP 风控告警 ({len(risk_cases)} 个独立玩家)")
         print(f"{'='*70}")
+        print(f"  ℹ️  当前缺少设备ID/手机号/银行卡/提款信息接口,")
+        print(f"     待后续通过F12抓取对应API后补充自动判断。")
 
         for rc in risk_cases:
             level_icon = "🔴" if rc["risk_level"] == "HIGH" else "🟡"
@@ -958,6 +993,19 @@ class BackendClient:
                 if total > max_same_ip_display:
                     remaining = total - max_same_ip_display
                     print(f"    ⚠️  还有 {remaining} 个同 IP 玩家未展示。")
+
+            # ── Enrichment ──
+            enrich = rc.get("enrichment", {})
+            if enrich:
+                dev_snap = enrich.get("device_snapshot", [])
+                if dev_snap:
+                    print(f"  设备快照:")
+                    for d in dev_snap:
+                        print(f"    {d['role']} ({d.get('customerName','?')}): {d.get('lastDevice') or 'N/A'}")
+                notes = enrich.get("notes", [])
+                if notes:
+                    for n in notes:
+                        print(f"  ℹ️  {n}")
 
             print(f"")
             print(f"  📅 Created: {rc['created_at']}")
@@ -1178,10 +1226,11 @@ class BackendClient:
 
     @staticmethod
     def _format_risk_telegram(rc: dict, max_same_ip: int = 10) -> str:
-        """Format a single risk_case into a Telegram message string."""
+        """Format a single risk_case into a Telegram message string (v3 — with review checklist)."""
         level_icon = "🔴" if rc["risk_level"] == "HIGH" else "🟡"
         rules_str = " + ".join(rc.get("risk_types", []))
         ips_str = "\n".join(f"• <code>{ip}</code>" for ip in rc.get("matched_ips", []))
+        enrich = rc.get("enrichment", {})
 
         lines = [
             f"{level_icon} <b>IP 风控告警 | {rc['risk_level']}</b>",
@@ -1226,6 +1275,37 @@ class BackendClient:
         if total > max_same_ip:
             lines.append(f"")
             lines.append(f"⚠️ 还有 {total - max_same_ip} 个同 IP 玩家未展示。")
+
+        # ── Enrichment / review section ──
+        lines.append(f"")
+        lines.append(f"<b>━━━ 补充核查 ━━━</b>")
+        lines.append(f"同设备：    待人工核查")
+        lines.append(f"同手机号：  待人工核查")
+        lines.append(f"同银行卡：  待人工核查")
+        lines.append(f"同提款信息：待人工核查")
+
+        # Device snapshot if available
+        dev_snap = enrich.get("device_snapshot", [])
+        if dev_snap:
+            dev_strs = [f"  {d['role']}({d.get('customerName','?')}): {d.get('lastDevice') or 'N/A'}" for d in dev_snap]
+            lines.append(f"设备快照：")
+            lines.extend(dev_strs)
+
+        lines.append(f"")
+        lines.append(f"<b>【人工核查清单】</b>")
+        lines.append(f"□ 是否同设备 / 同设备 ID")
+        lines.append(f"□ 是否同手机号")
+        lines.append(f"□ 是否同银行卡 / 同收款账号")
+        lines.append(f"□ 是否同提款信息")
+        lines.append(f"□ 是否存在批量注册 / 代理自操作嫌疑")
+        lines.append(f"□ 是否需要上报风控复核")
+
+        lines.append(f"")
+        lines.append(f"<b>【建议处理】</b>")
+        lines.append(f"1. 请人工核查该玩家账号与直属上级代理关系。")
+        lines.append(f"2. 请在后台检查设备、手机号、银行卡、提款信息是否关联。")
+        lines.append(f"3. 当前 Bot 仅做风险提醒，不会自动冻结提款。")
+        lines.append(f"4. 审核确认后，由人工按内部流程处理。")
 
         lines.append(f"")
         lines.append(f"<i>案件时间：{rc.get('created_at', 'N/A')}</i>")

@@ -1,6 +1,6 @@
 {
   "$schema": "https://railway.app/railway.schema.json",
   "deploy": {
-    "startCommand": "python -u backend_client.py today_scheduler"
+    "startCommand": "python -u backend_client.py push_server"
   }
 }

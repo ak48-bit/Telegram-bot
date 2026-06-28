@@ -1,0 +1,21 @@
+[Unit]
+Description=IP Risk Audit Bot — 30xsldx Agent Line Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ip-risk-bot
+EnvironmentFile=/opt/ip-risk-bot/.env
+ExecStart=/opt/ip-risk-bot/.venv/bin/python -u /opt/ip-risk-bot/backend_client.py today_scheduler
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening (optional)
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

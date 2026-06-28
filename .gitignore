@@ -11,6 +11,9 @@
 !RENDER_DEPLOY.md
 !RAILWAY_DEPLOY.md
 !railway.json
+!DIGITALOCEAN_DEPLOY.md
+!systemd/
+!systemd/ip-risk-bot.service
 
 # Explicitly excluded (sensitive / runtime data)
 # .env

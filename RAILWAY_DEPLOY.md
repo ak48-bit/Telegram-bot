@@ -20,6 +20,17 @@
    ```
    （如果没有 `railway.json`，在 Service → Settings 手动填写 Start Command）
 
+### Push Server 模式（推荐 — 绕过 Cloudflare）
+
+如果使用推送模式（后台主动推送数据到 Bot），将 Start Command 改为：
+
+```
+python -u backend_client.py push_server
+```
+
+此模式下 Bot 不再主动请求后台 API，改为被动接收。需要额外配置 `PUSH_API_TOKEN`（见下方环境变量）。
+详细集成文档见 `PUSH_API_INTEGRATION.md`。
+
 ## 三、Environment Variables
 
 在 Railway Dashboard → Service → Variables 中添加以下 12 个变量：
@@ -39,11 +50,19 @@
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token |
 | `TELEGRAM_ALERT_CHAT_ID` | 告警群 chat_id |
 
+Push 模式新增变量：
+
+| Key | 说明 |
+|---|---|
+| `PUSH_API_TOKEN` | 接收推送数据时的鉴权密钥 |
+
 可选：
 
 | Key | 说明 |
 |---|---|
 | `UPTIMEROBOT_HEARTBEAT_URL` | 健康监控回调 URL |
+
+> ⚠️ Push Server 模式下 `BACKEND_AUTHORIZATION` / `BACKEND_COOKIE` / `BACKEND_BASE_URL` 不再需要（Bot 不主动请求后台 API）。
 
 > ⚠️ Authorization / Cookie / Bot Token 只填到 Railway Variables，不要写入任何文件。
 

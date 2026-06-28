@@ -12,6 +12,7 @@
 !RAILWAY_DEPLOY.md
 !railway.json
 !DIGITALOCEAN_DEPLOY.md
+!PUSH_API_INTEGRATION.md
 !systemd/
 !systemd/ip-risk-bot.service
 

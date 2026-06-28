@@ -64,6 +64,194 @@ def _normalize_ip(ip):
 
 
 # ---------------------------------------------------------------------------
+# Push‑server helpers (module‑level — called from run_push_server)
+# ---------------------------------------------------------------------------
+
+def _pick(*values):
+    """Return the first non-None / non-empty value from the given candidates."""
+    for v in values:
+        if v is not None and str(v).strip() != "":
+            return v
+    return None
+
+
+def _normalize_push_player(raw: dict, top_agent: str, date_str: str) -> dict:
+    """Convert a push-format player dict into a canonical dict for risk analysis."""
+    reg_ip   = _normalize_ip(_pick(raw.get("register_ip"), raw.get("registerIp"), raw.get("reg_ip")))
+    login_ip = _normalize_ip(_pick(raw.get("login_ip"), raw.get("loginIp"), raw.get("last_login_ip")))
+    device   = _pick(raw.get("device"), raw.get("lastDevice"), raw.get("device_id"))
+    agent    = _pick(raw.get("agent"), raw.get("parent_agent"), raw.get("direct_agent"))
+    player   = _pick(raw.get("player_account"), raw.get("player"), raw.get("username"))
+    ta       = raw.get("top_agent") or top_agent
+
+    return {
+        "player":            player or "unknown",
+        "agent":             agent or "",
+        "top_agent":         ta,
+        "register_ip":       reg_ip,
+        "login_ip":          login_ip,
+        "device":            str(device).strip() if device else "",
+        "mobile":            str(raw.get("mobile", "")).strip(),
+        "bank_card":         str(raw.get("bank_card", "")).strip(),
+        "withdraw_account":  str(raw.get("withdraw_account", "")).strip(),
+        "payment_account":   str(raw.get("payment_account", "")).strip(),
+        "register_time":     str(raw.get("register_time", "")).strip() or date_str,
+        "last_login_time":   str(raw.get("last_login_time", "")).strip(),
+        "source":            raw.get("source", "push"),
+        "site":              raw.get("site", ""),
+        "date":              date_str,
+    }
+
+
+def _build_push_risk_index(players: list, key: str) -> dict:
+    """
+    Group players by a canonical key (register_ip, login_ip, device, etc.).
+    Returns {key_value: [player_dict, ...]}.
+    Only keys with >= 2 players are kept.
+    """
+    idx = {}
+    for p in players:
+        val = _normalize_ip(p.get(key)) if key.endswith("_ip") else p.get(key, "")
+        if not val:
+            continue
+        idx.setdefault(val, []).append(p)
+    return {k: v for k, v in idx.items() if len(v) >= 2}
+
+
+def _analyze_push_risks(players: list, source: str, site: str,
+                         top_agent: str, date_str: str) -> list:
+    """
+    Analyse push-received player data for same-IP / same-device clusters.
+
+    Returns a list of risk_case dicts compatible with existing
+    print/save/telegram functions.
+    """
+    risk_cases = []
+
+    # ── Same register_ip ──
+    for ip, group in _build_push_risk_index(players, "register_ip").items():
+        count = len(group)
+        level = "LOW" if count <= 2 else ("MEDIUM" if count <= 5 else "HIGH")
+        names = [p["player"] for p in group]
+        agents = sorted(set(p["agent"] for p in group if p["agent"]))
+        risk_cases.append(_make_push_risk_case(
+            level, "PUSH_SAME_REGISTER_IP", ip, "register_ip",
+            group, names, agents, source, site, top_agent, date_str))
+
+    # ── Same login_ip ──
+    for ip, group in _build_push_risk_index(players, "login_ip").items():
+        count = len(group)
+        level = "LOW" if count <= 2 else ("MEDIUM" if count <= 5 else "HIGH")
+        names = [p["player"] for p in group]
+        agents = sorted(set(p["agent"] for p in group if p["agent"]))
+        risk_cases.append(_make_push_risk_case(
+            level, "PUSH_SAME_LOGIN_IP", ip, "login_ip",
+            group, names, agents, source, site, top_agent, date_str))
+
+    # ── Same device ──
+    for dev, group in _build_push_risk_index(players, "device").items():
+        count = len(group)
+        level = "LOW" if count <= 2 else ("MEDIUM" if count <= 5 else "HIGH")
+        names = [p["player"] for p in group]
+        agents = sorted(set(p["agent"] for p in group if p["agent"]))
+        risk_cases.append(_make_push_risk_case(
+            level, "PUSH_SAME_DEVICE", dev, "device",
+            group, names, agents, source, site, top_agent, date_str))
+
+    # ── Same mobile (if data present) ──
+    for mob, group in _build_push_risk_index(players, "mobile").items():
+        count = len(group)
+        level = "LOW" if count <= 2 else ("MEDIUM" if count <= 5 else "HIGH")
+        names = [p["player"] for p in group]
+        agents = sorted(set(p["agent"] for p in group if p["agent"]))
+        risk_cases.append(_make_push_risk_case(
+            level, "PUSH_SAME_MOBILE", mob, "mobile",
+            group, names, agents, source, site, top_agent, date_str))
+
+    # ── Same bank_card ──
+    for card, group in _build_push_risk_index(players, "bank_card").items():
+        count = len(group)
+        level = "LOW" if count <= 2 else ("MEDIUM" if count <= 5 else "HIGH")
+        names = [p["player"] for p in group]
+        agents = sorted(set(p["agent"] for p in group if p["agent"]))
+        risk_cases.append(_make_push_risk_case(
+            level, "PUSH_SAME_BANK_CARD", card, "bank_card",
+            group, names, agents, source, site, top_agent, date_str))
+
+    # ── Same withdraw_account ──
+    for acct, group in _build_push_risk_index(players, "withdraw_account").items():
+        count = len(group)
+        level = "LOW" if count <= 2 else ("MEDIUM" if count <= 5 else "HIGH")
+        names = [p["player"] for p in group]
+        agents = sorted(set(p["agent"] for p in group if p["agent"]))
+        risk_cases.append(_make_push_risk_case(
+            level, "PUSH_SAME_WITHDRAW", acct, "withdraw_account",
+            group, names, agents, source, site, top_agent, date_str))
+
+    # ── Same payment_account ──
+    for acct, group in _build_push_risk_index(players, "payment_account").items():
+        count = len(group)
+        level = "LOW" if count <= 2 else ("MEDIUM" if count <= 5 else "HIGH")
+        names = [p["player"] for p in group]
+        agents = sorted(set(p["agent"] for p in group if p["agent"]))
+        risk_cases.append(_make_push_risk_case(
+            level, "PUSH_SAME_PAYMENT", acct, "payment_account",
+            group, names, agents, source, site, top_agent, date_str))
+
+    return risk_cases
+
+
+def _make_push_risk_case(level: str, risk_type: str, matched_key: str,
+                         key_label: str, group: list, player_names: list,
+                         agent_names: list, source: str, site: str,
+                         top_agent: str, date_str: str) -> dict:
+    """Build a risk_case dict compatible with print/save/send functions."""
+    sample = group[0]
+    return {
+        "risk_level":             level,
+        "risk_types":             [risk_type],
+        "reasons":                [f"Push data: {len(group)} players share same {key_label} = {matched_key}"],
+        "matched_ips":            [matched_key] if "ip" in key_label else [],
+        "matched_key":            matched_key,
+        "matched_key_type":       key_label,
+        "player_name":            player_names[0],
+        "player_customer_id":     matched_key,
+        "player_register_ip":     sample.get("register_ip"),
+        "player_last_login_ip":   sample.get("login_ip"),
+        "player_register_time":   sample.get("register_time"),
+        "player_last_login_time": sample.get("last_login_time"),
+        "direct_agent_name":      agent_names[0] if agent_names else "",
+        "agent_register_ip":      None,
+        "agent_last_login_ip":    None,
+        "agent_register_time":    None,
+        "agent_last_login_time":  None,
+        "same_ip_players":        [
+            {"customerName": p["player"], "customerId": p["player"],
+             "recommenderName": p["agent"],
+             "registerIp": p["register_ip"], "lastLoginIp": p["login_ip"],
+             "registerTime": p["register_time"], "lastLoginTime": p["last_login_time"]}
+            for p in group
+        ],
+        "same_ip_player_count":   len(group),
+        "enrichment": {
+            "same_device": None, "same_mobile": None,
+            "same_bank_card": None, "same_withdraw_info": None,
+            "same_payment_account": None,
+            "device_snapshot": [],
+            "mobile_snapshot": [],
+            "bank_snapshot": [],
+            "withdraw_snapshot": [],
+            "notes": ["数据来源: 后台主动推送 Push API"],
+        },
+        "source":                 source,
+        "site":                   site,
+        "top_agent":              top_agent,
+        "date":                   date_str,
+        "created_at":             datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # BackendClient
 # ---------------------------------------------------------------------------
 
@@ -1020,9 +1208,21 @@ class BackendClient:
         """
         Build a stable, sort-independent fingerprint for a risk_case.
 
-        Format:
+        Format (poll mode):
           player_customer_id|direct_agent_name|sorted_ips|sorted_rules
+
+        Format (push mode, when source/site/date exist):
+          PUSH|source|site|top_agent|risk_type|matched_key|date
         """
+        source = rc.get("source", "")
+        if source and rc.get("date"):
+            # Push-mode fingerprint
+            risk_type = ",".join(sorted(rc.get("risk_types", [])))
+            return (
+                f"PUSH|{source}|{rc.get('site','')}|{rc.get('top_agent','')}"
+                f"|{risk_type}|{rc.get('matched_key','')}|{rc.get('date','')}"
+            )
+        # Poll-mode fingerprint (original)
         pid = rc.get("player_customer_id", "")
         agent = rc.get("direct_agent_name", "")
         ips = "|".join(sorted(rc.get("matched_ips", [])))
@@ -1887,6 +2087,149 @@ class BackendClient:
             print(f"\n\n⏹️  收到 Ctrl+C，today_scheduler 已安全停止 ({run} runs)")
 
     # ------------------------------------------------------------------
+    # Push Server (receive data from backend, avoid Cloudflare 403)
+    # ------------------------------------------------------------------
+
+    def run_push_server(self, host: str = "0.0.0.0", port: int = None):
+        """
+        Start an HTTP server that receives player/IP data pushed from the
+        backend system.  The bot no longer needs to call the backend API
+        directly — the backend PUSHES data to this server instead.
+
+        Endpoints:
+          GET  /health           → health check
+          POST /risk-data/push   → ingest player data, run risk analysis
+        """
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import threading
+
+        if port is None:
+            port = int(os.environ.get("PORT", "8080"))
+
+        push_token = os.environ.get("PUSH_API_TOKEN", "")
+
+        # ── Handler factory (closure captures client + token) ──
+        client_ref = self
+        token = push_token
+
+        class PushHandler(BaseHTTPRequestHandler):
+            # Silence request logging
+            def log_message(self, fmt, *args):
+                pass
+
+            def _send_json(self, code: int, data: dict):
+                body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def _read_body(self) -> dict:
+                length = int(self.headers.get("Content-Length", "0"))
+                raw = self.rfile.read(length)
+                return json.loads(raw.decode("utf-8"))
+
+            def do_GET(self):
+                if self.path == "/health":
+                    self._send_json(200, {
+                        "ok": True,
+                        "service": "ip-risk-bot-push-server",
+                        "mode": "push_server",
+                    })
+                else:
+                    self._send_json(404, {"ok": False, "error": "not found"})
+
+            def do_POST(self):
+                if self.path != "/risk-data/push":
+                    self._send_json(404, {"ok": False, "error": "not found"})
+                    return
+
+                # ── Auth ──
+                req_token = self.headers.get("X-Risk-Bot-Token", "")
+                if not token:
+                    self._send_json(500, {"ok": False, "error": "PUSH_API_TOKEN not configured on server"})
+                    return
+                if not req_token:
+                    self._send_json(401, {"ok": False, "error": "missing X-Risk-Bot-Token header"})
+                    return
+                if req_token != token:
+                    self._send_json(403, {"ok": False, "error": "invalid token"})
+                    return
+
+                # ── Parse body ──
+                try:
+                    body = self._read_body()
+                except Exception:
+                    self._send_json(400, {"ok": False, "error": "invalid JSON body"})
+                    return
+
+                players_raw = body.get("players")
+                if not isinstance(players_raw, list):
+                    self._send_json(400, {"ok": False, "error": "players must be an array"})
+                    return
+
+                if len(players_raw) > 5000:
+                    self._send_json(400, {"ok": False, "error": "too many players (max 5000)"})
+                    return
+
+                # ── Summary log ──
+                source    = body.get("source", "unknown")
+                site      = body.get("site", body.get("top_agent", "?"))
+                top_agent = body.get("top_agent", "?")
+                date_str  = body.get("date", "?")
+                print(f"\n📥 PUSH received: source={source} site={site} "
+                      f"top_agent={top_agent} date={date_str} players={len(players_raw)}")
+
+                # ── Normalise players ──
+                players = [_normalize_push_player(p, top_agent, date_str) for p in players_raw]
+
+                # ── Run push risk analysis ──
+                risk_cases = _analyze_push_risks(players, source, site, top_agent, date_str)
+
+                print(f"  🔍 risk_cases found: {len(risk_cases)}")
+
+                # ── Save + Telegram ──
+                if risk_cases:
+                    client_ref.print_risk_cases(risk_cases)
+                    client_ref.save_risk_cases(risk_cases)
+                    tg_result = client_ref.send_risk_cases_to_telegram(risk_cases)
+                    tg_sent = tg_result.get("sent", 0)
+                    tg_skip = tg_result.get("skipped", 0)
+                else:
+                    tg_sent = 0
+                    tg_skip = 0
+
+                self._send_json(200, {
+                    "ok": True,
+                    "players_received": len(players_raw),
+                    "risk_cases_found": len(risk_cases),
+                    "telegram_sent": tg_sent,
+                    "telegram_skipped_duplicate": tg_skip,
+                })
+
+        # ── Start server ──
+        if not token:
+            print("⚠️  PUSH_API_TOKEN 未设置! 所有请求将被拒绝。")
+            print("   请在 .env 中设置 PUSH_API_TOKEN=<你的密钥>")
+
+        server = HTTPServer((host, port), PushHandler)
+        print(f"\n{'='*60}")
+        print(f"🚀 Push Server 启动")
+        print(f"   Listening:    http://{host}:{port}")
+        print(f"   Health:       http://{host}:{port}/health")
+        print(f"   Push:         http://{host}:{port}/risk-data/push")
+        print(f"   Auth:         {'✅ PUSH_API_TOKEN configured' if token else '❌ MISSING'}")
+        print(f"   Backend API:  NOT USED (passive receiver)")
+        print(f"{'='*60}")
+
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\n⏹️  Push Server 已停止")
+            server.shutdown()
+
+    # ------------------------------------------------------------------
     # Scheduler
     # ------------------------------------------------------------------
 
@@ -1975,9 +2318,11 @@ Modes:
   today_scheduler      持续运行, 每60s扫描今日注册 (Ctrl+C 停止)
   today_scheduler_test 5 runs × 60s interval (auto-stop)
   scheduler_test       3 runs × 300s interval (full 10-page scan)
+  push_server          HTTP server, receive pushed data from backend
   debug_chat           Print Telegram getUpdates to find correct chat_id
   env_check            Check required environment variables (safe, no values printed)
   outbound_ip          Print current server outbound IP (api.ipify.org)
+  railway_diagnose     Full Railway deployment diagnostic
 """.strip()
 
     client = BackendClient()
@@ -2039,6 +2384,9 @@ Modes:
         print(f"  TOP_AGENT:     {client.top_agent}")
         client.run_scheduler_test(interval_seconds=300, max_runs=3)
 
+    elif mode == "push_server":
+        client.run_push_server()
+
     elif mode == "outbound_ip":
         try:
             req = urllib.request.Request("https://api.ipify.org")
@@ -2063,6 +2411,7 @@ Modes:
             ("TELEGRAM_BOT_TOKEN",     False),
             ("TELEGRAM_ALERT_CHAT_ID", True),
             ("UPTIMEROBOT_HEARTBEAT_URL", True),
+            ("PUSH_API_TOKEN",         False),
         ]
         for key, show_value in checks:
             val = os.environ.get(key, "")
@@ -2102,6 +2451,7 @@ Modes:
             ("TELEGRAM_BOT_TOKEN",     False),
             ("TELEGRAM_ALERT_CHAT_ID", True),
             ("UPTIMEROBOT_HEARTBEAT_URL", True),
+            ("PUSH_API_TOKEN",         False),
         ]
         for key, show in env_keys:
             val = os.environ.get(key, "")

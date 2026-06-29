@@ -33,6 +33,13 @@ const config = {
     perHour: 10,
   },
 
+  // ── Game Account API (Phase 1: disabled, Phase 2: real API) ──
+  GAME_ACCOUNT_API_ENABLED: (process.env.GAME_ACCOUNT_API_ENABLED || 'false') === 'true',
+  GAME_ACCOUNT_API_URL: process.env.GAME_ACCOUNT_API_URL || '',
+  GAME_ACCOUNT_API_METHOD: process.env.GAME_ACCOUNT_API_METHOD || 'POST',
+  GAME_ACCOUNT_API_KEY: process.env.GAME_ACCOUNT_API_KEY || '',
+  GAME_ACCOUNT_API_TIMEOUT_MS: parseInt(process.env.GAME_ACCOUNT_API_TIMEOUT_MS || '8000', 10),
+
   // Command button whitelist — which commands can be triggered via cmd: callback
   CALLBACK_COMMAND_WHITELIST: {
     admin: ['/admin', '/add_agent', '/list_agents', '/list_promoters', '/list_players',

@@ -91,6 +91,9 @@ async function callWjApi(gameId) {
 
   const headers = {
     'accept': 'application/json, text/plain, */*',
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'cache-control': 'no-cache',
+    'pragma': 'no-cache',
     'authorization': config.GAME_ACCOUNT_API_AUTHORIZATION,
     'environment': config.GAME_ACCOUNT_API_ENVIRONMENT,
     'language': config.GAME_ACCOUNT_API_LANGUAGE,
@@ -99,6 +102,13 @@ async function callWjApi(gameId) {
     'notpending': config.GAME_ACCOUNT_API_NOTPENDING,
     'platform': config.GAME_ACCOUNT_API_PLATFORM,
   };
+
+  // Optional headers — only sent when non-empty (anti-403)
+  if (config.GAME_ACCOUNT_API_REFERER) headers['referer'] = config.GAME_ACCOUNT_API_REFERER;
+  if (config.GAME_ACCOUNT_API_ORIGIN) headers['origin'] = config.GAME_ACCOUNT_API_ORIGIN;
+  if (config.GAME_ACCOUNT_API_COOKIE) headers['cookie'] = config.GAME_ACCOUNT_API_COOKIE;
+  if (config.GAME_ACCOUNT_API_USER_AGENT) headers['user-agent'] = config.GAME_ACCOUNT_API_USER_AGENT;
+  if (config.GAME_ACCOUNT_API_TAC_TRACE_ID) headers['tac-trace-id'] = config.GAME_ACCOUNT_API_TAC_TRACE_ID;
 
   const signal = AbortSignal.timeout(config.GAME_ACCOUNT_API_TIMEOUT_MS);
 
@@ -109,12 +119,19 @@ async function callWjApi(gameId) {
   });
 
   if (!response.ok) {
+    let bodySnippet = '';
+    try {
+      const text = await response.text();
+      bodySnippet = text.slice(0, 500);
+    } catch (_) { /* ignore body read errors */ }
+    console.error(`[GameAccountAPI] HTTP ${response.status} body: ${bodySnippet}`);
     throw new Error(`WJ API returned HTTP ${response.status}`);
   }
 
   const data = await response.json();
 
   if (!data || typeof data.success === 'undefined') {
+    console.error('[GameAccountAPI] Unrecognized response:', JSON.stringify(data).slice(0, 500));
     throw new Error('WJ API returned unrecognized response structure');
   }
 

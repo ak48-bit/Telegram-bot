@@ -51,6 +51,13 @@ const config = {
   GAME_ACCOUNT_API_PLATFORM: process.env.GAME_ACCOUNT_API_PLATFORM || '',
   GAME_ACCOUNT_API_NOTPENDING: process.env.GAME_ACCOUNT_API_NOTPENDING || 'true',
 
+  // WJ API optional headers (anti-403) — empty = not sent
+  GAME_ACCOUNT_API_REFERER: process.env.GAME_ACCOUNT_API_REFERER || '',
+  GAME_ACCOUNT_API_ORIGIN: process.env.GAME_ACCOUNT_API_ORIGIN || '',
+  GAME_ACCOUNT_API_COOKIE: process.env.GAME_ACCOUNT_API_COOKIE || '',
+  GAME_ACCOUNT_API_USER_AGENT: process.env.GAME_ACCOUNT_API_USER_AGENT || 'Mozilla/5.0',
+  GAME_ACCOUNT_API_TAC_TRACE_ID: process.env.GAME_ACCOUNT_API_TAC_TRACE_ID || '',
+
   // Command button whitelist — which commands can be triggered via cmd: callback
   CALLBACK_COMMAND_WHITELIST: {
     admin: ['/admin', '/add_agent', '/list_agents', '/list_promoters', '/list_players',

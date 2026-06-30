@@ -64,7 +64,10 @@ async function handleSubmit(ctx) {
     return ctx.reply('This referral line has been suspended. Please contact customer service.');
   }
 
-  if (p.game_id_status === 'approved' || p.game_id_status === 'submitted') {
+  // Only block if player actually has a Game ID — game_id_status alone is not enough
+  // (game_id may have been cleared by admin while status remains 'submitted')
+  const hasGameId = !!(p.game_id_normalized || p.game_id);
+  if (hasGameId && ['submitted', 'approved'].includes(p.game_id_status)) {
     await audit.log(uid, 'player', 'submit_game_id_already_submitted', 'player', String(uid), { game_id: gameId });
     return ctx.reply('Your Game ID has already been submitted and cannot be changed.');
   }

@@ -276,6 +276,16 @@ async function stepSubmitGameId(ctx, s, text) {
     session.delete(uid);
     return ctx.reply('Please enter through a valid Bot Share Link first.');
   }
+  const p = player.rows[0];
+
+  // Only block if player actually has a Game ID — game_id_status alone is not enough
+  const hasGameId = !!(p.game_id_normalized || p.game_id);
+  if (hasGameId && ['submitted', 'approved'].includes(p.game_id_status)) {
+    await audit.log(uid, 'player', 'submit_game_id_already_submitted', 'player', String(uid), { game_id: gameId });
+    session.delete(uid);
+    return ctx.reply('Your Game ID has already been submitted and cannot be changed.');
+  }
+
   const dup = await db.query(`SELECT telegram_id FROM players WHERE game_id_normalized = $1 AND telegram_id != $2`, [gameId, uid]);
   if (dup.rows.length > 0) {
     await audit.log(uid, 'player', 'submit_game_id_duplicate', 'player', String(uid), { game_id: gameId });

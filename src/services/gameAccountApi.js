@@ -138,9 +138,16 @@ async function checkGameAccount(gameId) {
   }
 
   // ── Guard: require essential config ──
-  if (!config.GAME_ACCOUNT_API_URL || !config.GAME_ACCOUNT_API_MERCHANT_CODE) {
-    console.error('[GameAccountAPI] ENABLED=true but URL or MERCHANT_CODE missing');
-    return apiErrorResult(gameId, 'API URL or MERCHANT_CODE not configured');
+  const missing = [];
+  if (!config.GAME_ACCOUNT_API_URL) missing.push('URL');
+  if (!config.GAME_ACCOUNT_API_MERCHANT_CODE) missing.push('MERCHANT_CODE');
+  if (!config.GAME_ACCOUNT_API_AUTHORIZATION) missing.push('AUTHORIZATION');
+  if (!config.GAME_ACCOUNT_API_ENVIRONMENT) missing.push('ENVIRONMENT');
+  if (!config.GAME_ACCOUNT_API_PLATFORM) missing.push('PLATFORM');
+  if (missing.length > 0) {
+    const msg = `missing config: ${missing.join(', ')}`;
+    console.error(`[GameAccountAPI] ${msg}`);
+    return apiErrorResult(gameId, msg);
   }
 
   // ── Call WJ API ──

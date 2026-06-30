@@ -1,78 +1,167 @@
 /**
  * Game Account API Service
  *
- * Checks whether a submitted Game ID is:
- *   1. Already registered in the game backend
- *   2. Whether the phone number is verified
+ * Checks whether a submitted Game ID is registered in the WJ Safety backend.
  *
- * Phase 1 (current): Mock / disabled mode.
- *   - When GAME_ACCOUNT_API_ENABLED=false, returns a disabled/mock result.
- *   - Does NOT call any external API.
- *   - Does NOT change the current "submitted" record flow.
+ * Phase 1 (disabled): GAME_ACCOUNT_API_ENABLED=false → no external calls,
+ *   returns { status: 'submitted', source: 'disabled' } immediately.
  *
- * Phase 2 (future): When GAME_ACCOUNT_API_ENABLED=true and a real API
- *   URL / key is configured, replace checkGameAccount() with the real
- *   HTTP call and response parsing.
+ * Phase 2 (enabled):  GAME_ACCOUNT_API_ENABLED=true  → calls
+ *   GET https://www.wj-safety.com/tac/api/relay/get/player-search-non-bankcard
+ *   with query params and header-based auth (no cookies).
  */
 
 const config = require('../config');
 
 /**
- * Status values returned by this service (mirrors migration proposal):
- *   submitted               – default, API not called
- *   api_checking            – API call in-flight (future async mode)
- *   verified                – registered + phone verified
- *   registered_unverified   – registered but phone NOT verified
- *   not_registered          – Game ID not found in backend
- *   api_error               – API timeout / network error / invalid response
+ * Status values:
+ *   submitted       – API not called (disabled mode, current behavior)
+ *   verified        – Game ID found in WJ backend (success === true, total > 0)
+ *   not_registered  – Game ID NOT found (success === true, total === 0)
+ *   api_error       – network error / timeout / bad response
  */
 
-/**
- * Check a Game ID against the backend account API.
- *
- * Phase 1 behaviour:
- *   - Returns { status: 'submitted', source: 'disabled', ... } immediately.
- *   - If GAME_ACCOUNT_API_ENABLED=true but no real implementation exists,
- *     throws a clear error so no partial data is persisted.
- *
- * @param {string} gameId — Normalized Game ID (already trimmed & uppercased by caller)
- * @returns {Promise<{status: string, gameId: string, checkedAt: string, source: string, registered: boolean|null, phoneVerified: boolean|null}>}
- */
-async function checkGameAccount(gameId) {
-  if (!config.GAME_ACCOUNT_API_ENABLED) {
-    return {
-      status: 'submitted',
-      gameId,
-      checkedAt: new Date().toISOString(),
-      source: 'disabled',
-      registered: null,
-      phoneVerified: null,
-    };
+// ── Disabled mode (Phase 1 compat) ──
+
+function disabledResult(gameId) {
+  return {
+    status: 'submitted',
+    exists: null,
+    gameId,
+    checkedAt: new Date().toISOString(),
+    source: 'disabled',
+  };
+}
+
+// ── Response parsers ──
+
+function parseVerified(data, gameId) {
+  const list = data.value?.list;
+  const first = Array.isArray(list) && list.length > 0 ? list[0] : null;
+  return {
+    status: 'verified',
+    exists: true,
+    gameId,
+    checkedAt: new Date().toISOString(),
+    source: 'wj-api',
+    customerId: first?.customerId ?? null,
+    customerName: first?.customerName ?? null,
+    total: data.value?.total ?? 0,
+    raw: data,
+  };
+}
+
+function parseNotRegistered(data, gameId) {
+  return {
+    status: 'not_registered',
+    exists: false,
+    gameId,
+    checkedAt: new Date().toISOString(),
+    source: 'wj-api',
+    total: 0,
+    raw: data,
+  };
+}
+
+function apiErrorResult(gameId, error) {
+  return {
+    status: 'api_error',
+    exists: null,
+    gameId,
+    checkedAt: new Date().toISOString(),
+    source: 'wj-api',
+    error: String(error),
+  };
+}
+
+// ── WJ API call ──
+
+async function callWjApi(gameId) {
+  const params = new URLSearchParams();
+  params.set('merchantCode', config.GAME_ACCOUNT_API_MERCHANT_CODE);
+  params.set('isWildcard', 'false');
+  params.set('size', '10');
+  params.set('page', '1');
+  params.set('sortType', 'desc');
+  params.set('pageable', 'true');
+  params.set('data', gameId);
+  params.set('searchCode', 'USERNAME');
+
+  const url = `${config.GAME_ACCOUNT_API_URL}?${params.toString()}`;
+
+  const headers = {
+    'accept': 'application/json, text/plain, */*',
+    'authorization': config.GAME_ACCOUNT_API_AUTHORIZATION,
+    'environment': config.GAME_ACCOUNT_API_ENVIRONMENT,
+    'language': config.GAME_ACCOUNT_API_LANGUAGE,
+    'merchant': config.GAME_ACCOUNT_API_MERCHANT_CODE,
+    'merchantcode': config.GAME_ACCOUNT_API_MERCHANT_CODE,
+    'notpending': config.GAME_ACCOUNT_API_NOTPENDING,
+    'platform': config.GAME_ACCOUNT_API_PLATFORM,
+  };
+
+  const signal = AbortSignal.timeout(config.GAME_ACCOUNT_API_TIMEOUT_MS);
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`WJ API returned HTTP ${response.status}`);
   }
 
-  // ── Phase 2: real API call placeholder ──
-  // TODO: Replace this block with actual fetch() / axios call.
-  //
-  // Example (do NOT uncomment until Phase 2):
-  //   const response = await fetch(config.GAME_ACCOUNT_API_URL, {
-  //     method: config.GAME_ACCOUNT_API_METHOD,
-  //     headers: {
-  //       'Content-Type': 'application/json',
-  //       'Authorization': `Bearer ${config.GAME_ACCOUNT_API_KEY}`,
-  //     },
-  //     body: JSON.stringify({ game_id: gameId }),
-  //     signal: AbortSignal.timeout(config.GAME_ACCOUNT_API_TIMEOUT_MS),
-  //   });
-  //   if (!response.ok) {
-  //     return { status: 'api_error', gameId, ... };
-  //   }
-  //   const data = await response.json();
-  //   return parseApiResponse(data, gameId);
+  const data = await response.json();
 
-  throw new Error(
-    'GAME_ACCOUNT_API_ENABLED=true but no API URL or implementation configured. ' +
-    'Set GAME_ACCOUNT_API_URL and GAME_ACCOUNT_API_KEY to proceed to Phase 2.'
-  );
+  if (!data || typeof data.success === 'undefined') {
+    throw new Error('WJ API returned unrecognized response structure');
+  }
+
+  return data;
+}
+
+// ── Public API ──
+
+/**
+ * Check a Game ID against the WJ backend.
+ *
+ * @param {string} gameId — Normalized Game ID (already trimmed & uppercased by caller)
+ * @returns {Promise<object>}
+ *   { status: 'submitted'|'verified'|'not_registered'|'api_error',
+ *     exists: boolean|null, gameId, checkedAt, source, ... }
+ */
+async function checkGameAccount(gameId) {
+  // ── Disabled mode: no external calls ──
+  if (!config.GAME_ACCOUNT_API_ENABLED) {
+    return disabledResult(gameId);
+  }
+
+  // ── Guard: require essential config ──
+  if (!config.GAME_ACCOUNT_API_URL || !config.GAME_ACCOUNT_API_MERCHANT_CODE) {
+    console.error('[GameAccountAPI] ENABLED=true but URL or MERCHANT_CODE missing');
+    return apiErrorResult(gameId, 'API URL or MERCHANT_CODE not configured');
+  }
+
+  // ── Call WJ API ──
+  try {
+    const data = await callWjApi(gameId);
+
+    if (data.success === true && data.value && data.value.total > 0) {
+      return parseVerified(data, gameId);
+    }
+
+    if (data.success === true && data.value && data.value.total === 0) {
+      return parseNotRegistered(data, gameId);
+    }
+
+    // Unrecognized success shape — treat as error
+    console.error('[GameAccountAPI] Unexpected response shape:', JSON.stringify(data).slice(0, 500));
+    return apiErrorResult(gameId, 'Unrecognized API response');
+  } catch (err) {
+    console.error('[GameAccountAPI] Error checking Game ID:', gameId, err.message);
+    return apiErrorResult(gameId, err.message);
+  }
 }
 
 module.exports = { checkGameAccount };

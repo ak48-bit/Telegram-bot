@@ -2,6 +2,7 @@ const { escapeHtml, isUniqueViolation } = require('../services/escapeHtml');
 const db = require('../db');
 const audit = require('../services/audit');
 const config = require('../config');
+const { checkGameAccount } = require('../services/gameAccountApi');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 
@@ -76,6 +77,24 @@ async function handleSubmit(ctx) {
     return ctx.reply('This Game ID has already been submitted.');
   }
 
+  // ── Phase 2: Verify Game ID against WJ backend API ──
+  const apiResult = await checkGameAccount(gameId);
+
+  if (apiResult.status === 'not_registered') {
+    await audit.log(uid, 'player', 'submit_game_id_not_registered', 'player', String(uid), { game_id: gameId, source: apiResult.source });
+    return ctx.reply(
+      '❌ Game ID not found.\nPlease make sure you have registered your game account first, then submit again.'
+    );
+  }
+
+  if (apiResult.status === 'api_error') {
+    await audit.log(uid, 'player', 'submit_game_id_api_error', 'player', String(uid), { game_id: gameId, error: apiResult.error });
+    return ctx.reply(
+      '⚠️ Verification is temporarily unavailable.\nPlease try again later.'
+    );
+  }
+  // verified or submitted (disabled mode) → proceed
+
   try {
     await db.query(
       `UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted',
@@ -88,10 +107,13 @@ async function handleSubmit(ctx) {
     }
     throw e;
   }
-  await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId });
+  await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId, api_status: apiResult.status, source: apiResult.source });
 
+  const verifiedText = apiResult.status === 'verified'
+    ? '\n✅ Game ID verified successfully.\nYour account has been found in the game backend.'
+    : '\n✅ Game ID submitted successfully.';
   return ctx.reply(
-    `🎮 <b>Game ID Submitted</b>\n\n<code>/submit ${escapeHtml(gameId)}</code>\n\n✅ Game ID submitted successfully.\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`,
+    `🎮 <b>Game ID Submitted</b>\n\n<code>/submit ${escapeHtml(gameId)}</code>\n${verifiedText}\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`,
     { parse_mode: 'HTML' }
   );
 }

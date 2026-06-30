@@ -33,12 +33,23 @@ const config = {
     perHour: 10,
   },
 
-  // ── Game Account API (Phase 1: disabled, Phase 2: real API) ──
+  // ── Game Account API (WJ Safety backend) ──
+  // Phase 1: GAME_ACCOUNT_API_ENABLED=false → keeps current "submitted" flow
+  // Phase 2: GAME_ACCOUNT_API_ENABLED=true  → calls WJ API to verify Game ID exists
   GAME_ACCOUNT_API_ENABLED: (process.env.GAME_ACCOUNT_API_ENABLED || 'false') === 'true',
-  GAME_ACCOUNT_API_URL: process.env.GAME_ACCOUNT_API_URL || '',
-  GAME_ACCOUNT_API_METHOD: process.env.GAME_ACCOUNT_API_METHOD || 'POST',
-  GAME_ACCOUNT_API_KEY: process.env.GAME_ACCOUNT_API_KEY || '',
+  GAME_ACCOUNT_API_URL: process.env.GAME_ACCOUNT_API_URL || 'https://www.wj-safety.com/tac/api/relay/get/player-search-non-bankcard',
+  GAME_ACCOUNT_API_METHOD: process.env.GAME_ACCOUNT_API_METHOD || 'GET',
   GAME_ACCOUNT_API_TIMEOUT_MS: parseInt(process.env.GAME_ACCOUNT_API_TIMEOUT_MS || '8000', 10),
+
+  // WJ API query params (merchant code)
+  GAME_ACCOUNT_API_MERCHANT_CODE: process.env.GAME_ACCOUNT_API_MERCHANT_CODE || '',
+
+  // WJ API headers — all from env, nothing hardcoded
+  GAME_ACCOUNT_API_AUTHORIZATION: process.env.GAME_ACCOUNT_API_AUTHORIZATION || '',
+  GAME_ACCOUNT_API_ENVIRONMENT: process.env.GAME_ACCOUNT_API_ENVIRONMENT || '',
+  GAME_ACCOUNT_API_LANGUAGE: process.env.GAME_ACCOUNT_API_LANGUAGE || '',
+  GAME_ACCOUNT_API_PLATFORM: process.env.GAME_ACCOUNT_API_PLATFORM || '',
+  GAME_ACCOUNT_API_NOTPENDING: process.env.GAME_ACCOUNT_API_NOTPENDING || 'true',
 
   // Command button whitelist — which commands can be triggered via cmd: callback
   CALLBACK_COMMAND_WHITELIST: {

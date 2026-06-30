@@ -46,6 +46,8 @@ async function handleSessionMessage(ctx, s) {
       return stepSetPlayerLink(ctx, s, text);
     case 'submit_game_id':
       return stepSubmitGameId(ctx, s, text);
+    case 'relink_promoter_waiting_code':
+      return stepRelinkPromoterCode(ctx, s, text);
     default:
       session.delete(uid);
       return ctx.reply('Session expired. Please start again.');
@@ -431,6 +433,24 @@ async function stepApplyAgentName(ctx, s, text) {
     `<i>Please wait for Admin approval.</i>`,
     { parse_mode: 'HTML' }
   );
+}
+
+// ── Relink Promoter step handler (triggered by Agent panel "🔄 Relink Promoter" button) ──
+async function stepRelinkPromoterCode(ctx, s, text) {
+  const uid = ctx.from.id;
+  const code = text.trim();
+
+  // Validate promoter code format
+  if (!code || code.length < 2 || code.length > 20) {
+    session.delete(uid);
+    return ctx.reply('Invalid Promoter Code format. Please try again.');
+  }
+
+  session.delete(uid);
+
+  // Delegate to core relink logic (same as /relink_pm command)
+  const { relinkPromoterCore } = require('./agent');
+  return relinkPromoterCore(ctx, uid, code);
 }
 
 module.exports = { handleSessionMessage, handleSessionCallback };

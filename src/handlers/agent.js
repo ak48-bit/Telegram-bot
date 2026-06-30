@@ -63,6 +63,7 @@ async function handleAgent(ctx) {
       parse_mode: 'HTML',
       reply_markup: { inline_keyboard: [
         [{ text: '📊 Refresh', callback_data: 'cmd:/agent' }, { text: '➕ Add Promoter', callback_data: 'cmd:/add_promoter' }],
+        [{ text: '🔄 Relink Promoter', callback_data: 'relink_promoter_start' }],
         [{ text: '🔗 Set Agent Link', callback_data: 'cmd:/set_agent_link' }, { text: '📋 My Link', callback_data: 'cmd:/my_agent_link' }],
         [{ text: '👥 My Promoters', callback_data: 'cmd:/list_my_promoters' }, { text: '🎮 My Players', callback_data: 'cmd:/list_my_players' }],
       ]}
@@ -268,16 +269,24 @@ async function handleMyAgentLink(ctx) {
 }
 
 // /list_my_promoters
-async function handleListMyPromoters(ctx) {
+async function handleListMyPromoters(ctx, editMode = false) {
   const uid = ctx.from.id;
   const ag = await db.query('SELECT id FROM agents WHERE telegram_id = $1', [uid]);
-  if (ag.rows.length === 0) return ctx.reply('Agent not bound.');
+  if (ag.rows.length === 0) {
+    return (editMode ? ctx.editMessageText('Agent not bound.') : ctx.reply('Agent not bound.'));
+  }
   const res = await db.query(
     `SELECT pm.*, u.username FROM promoters pm LEFT JOIN users u ON pm.telegram_id = u.telegram_id WHERE pm.agent_id = $1 ORDER BY pm.created_at DESC`,
     [ag.rows[0].id]
   );
-  if (res.rows.length === 0) return ctx.reply('No promoters yet.');
+  if (res.rows.length === 0) {
+    return (editMode ? ctx.editMessageText('No promoters yet.') : ctx.reply('No promoters yet.'));
+  }
   const lines = ['<b>My Promoters</b>\n'];
+
+  // Build inline keyboard — one relink button per unbound promoter
+  const inlineKeyboard = [];
+
   for (const r of res.rows) {
     const status = { active: '✅', blocked: '🚫', pending: '⏳' }[r.status] || '❓';
     const tg = r.telegram_id ? `<code>${r.telegram_id}</code>` : 'Not bound';
@@ -285,9 +294,23 @@ async function handleListMyPromoters(ctx) {
     const todayRes = await db.query('SELECT COUNT(*) FROM players WHERE promoter_id = $1 AND created_at::date = CURRENT_DATE', [r.id]);
     const linkIcon = r.link_status === 'BOUND' ? '✅' : '⚠️';
     const linkInfo = r.player_affiliate_link_original ? `${r.player_affiliate_link_original}` : 'Not Set';
+    const isUnbound = r.status === 'pending' || !r.telegram_id;
     lines.push(`${status} <code>${r.promoter_code}</code> — ${r.name}\n   Link: ${linkIcon} ${linkInfo}\n   Players: ${countRes.rows[0].count} total | 🆕 Today: ${todayRes.rows[0].count} | TG: ${tg}`);
+
+    // Add relink button for unbound promoters
+    if (isUnbound) {
+      inlineKeyboard.push([{ text: `🔄 Relink ${r.promoter_code}`, callback_data: `relink_pm_${r.promoter_code}` }]);
+    }
   }
-  return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
+
+  const opts = { parse_mode: 'HTML' };
+  if (inlineKeyboard.length > 0) {
+    opts.reply_markup = { inline_keyboard: inlineKeyboard };
+  }
+
+  return editMode
+    ? ctx.editMessageText(lines.join('\n'), opts).catch(() => ctx.reply(lines.join('\n'), opts))
+    : ctx.reply(lines.join('\n'), opts);
 }
 
 // /list_my_players
@@ -330,24 +353,46 @@ async function handleExportMyPlayers(ctx) {
   }
 }
 
-// /relink_pm
-async function handleRelinkPromoter(ctx) {
-  const uid = ctx.from.id;
-  const ag = await db.query('SELECT * FROM agents WHERE telegram_id = $1', [uid]);
-  if (ag.rows.length === 0) return ctx.reply('Agent not bound.');
-  const parts = ctx.message.text.trim().split(/\s+/);
-  if (parts.length < 2) return ctx.reply('Format: <code>/relink_pm B001</code>', { parse_mode: 'HTML' });
-  const code = parts[1];
-  const pm = await db.query('SELECT * FROM promoters WHERE promoter_code = $1 AND agent_id = $2', [code, ag.rows[0].id]);
-  if (pm.rows.length === 0) return ctx.reply(`Promoter <code>${code}</code> not found or not under you.`, { parse_mode: 'HTML' });
-  await db.query(`UPDATE invite_tokens SET is_used = TRUE WHERE code = $1 AND type = 'promoter_bind' AND is_used = FALSE`, [code]);
-  const token = await createInviteToken('promoter_bind', code, uid);
+// ── Relink Promoter Core ──
+// Shared by /relink_pm command, session step, and inline callback buttons.
+// Invalidates all existing unused promoter_bind tokens for this code, then creates a new one.
+
+async function relinkPromoterCore(ctx, uid, promoterCode) {
+  const ag = await db.query('SELECT * FROM agents WHERE telegram_id = $1 AND status = $2', [uid, 'active']);
+  if (ag.rows.length === 0) {
+    // ctx may be a callbackQuery — use reply or editMessageText as appropriate
+    const reply = ctx.reply || ctx.editMessageText;
+    return reply.call(ctx, 'Agent not bound or blocked.').catch(() => {});
+  }
+
+  const pm = await db.query(
+    'SELECT * FROM promoters WHERE promoter_code = $1 AND agent_id = $2',
+    [promoterCode, ag.rows[0].id]
+  );
+  if (pm.rows.length === 0) {
+    const reply = ctx.reply || ctx.editMessageText;
+    await audit.log(uid, 'agent', 'relink_promoter_denied_not_owner', 'promoter', promoterCode);
+    return reply.call(ctx, `Promoter <code>${promoterCode}</code> not found or not under you.`, { parse_mode: 'HTML' }).catch(() => {});
+  }
+
+  // Invalidate old unused tokens
+  await db.query(
+    `UPDATE invite_tokens SET is_used = TRUE WHERE code = $1 AND type = 'promoter_bind' AND is_used = FALSE`,
+    [promoterCode]
+  );
+
+  const token = await createInviteToken('promoter_bind', promoterCode, uid);
   const botLink = `https://t.me/${BOT_USERNAME}?start=bind_promoter_${token}`;
   const manualCmd = `/start bind_promoter_${token}`;
-  await audit.log(uid, 'agent', 'relink_promoter', 'promoter', code);
-  return ctx.reply(
+  await audit.log(uid, 'agent', 'relink_promoter', 'promoter', promoterCode);
+
+  const replyFn = ctx.editMessageText
+    ? (text, opts) => ctx.editMessageText(text, opts).catch(() => ctx.reply(text, opts))
+    : ctx.reply;
+
+  return replyFn.call(ctx,
     `🔗 <b>Promoter Binding Link (New)</b>\n\n` +
-    `Code：<code>${code}</code>\n` +
+    `Code：<code>${promoterCode}</code>\n` +
     `Name：${pm.rows[0].name}\n\n` +
     `<b>📋 Send this to Promoter：</b>\n\n` +
     `<code>${manualCmd}</code>\n\n` +
@@ -363,6 +408,26 @@ async function handleRelinkPromoter(ctx) {
       ]] }
     }
   );
+}
+
+// /relink_pm <PromoterCode> — manual command (kept for backward compat)
+async function handleRelinkPromoter(ctx) {
+  const uid = ctx.from.id;
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) {
+    // Enter session mode for step-by-step input
+    const session = require('../services/session');
+    session.set(uid, { action: 'relink_promoter_waiting_code', data: {}, userRole: 'agent', cancelAudit: 'relink_promoter_cancelled' });
+    await audit.log(uid, 'agent', 'relink_promoter_session_started', null, null, {});
+    return ctx.reply('Please enter Promoter Code to regenerate binding link.');
+  }
+  return relinkPromoterCore(ctx, uid, parts[1]);
+}
+
+// Callback handler for inline "🔄 Relink" buttons (from /agent panel and /list_my_promoters)
+async function handleRelinkPromoterCallback(ctx, promoterCode) {
+  const uid = ctx.callbackQuery.from.id;
+  return relinkPromoterCore(ctx, uid, promoterCode);
 }
 
 // /update_promoter_link <promoter_code> <affiliate_link>
@@ -451,5 +516,6 @@ module.exports = {
   handleAgent, handleAddPromoter, handleListMyPromoters,
   handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
   handleSetAgentLink, handleMyAgentLink, handleAgentSetPromoCompat,
-  handleUpdatePromoterLink,
+  handleUpdatePromoterLink, handleRelinkPromoterCallback,
+  relinkPromoterCore,
 };

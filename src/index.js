@@ -22,7 +22,7 @@ const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
   handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
   handleSetAgentLink, handleMyAgentLink, handleAgentSetPromoCompat,
-  handleUpdatePromoterLink,
+  handleUpdatePromoterLink, handleRelinkPromoterCallback,
 } = require('./handlers/agent');
 const {
   handlePromoter, handleMyLink, handleMyPlayers, handleMyToday,
@@ -254,6 +254,48 @@ bot.on('callback_query', async (ctx) => {
     }
     await ctx.answerCbQuery().catch(() => {});
     return handleAdminPanelButtons(ctx, data);
+  }
+
+  // ── Relink Promoter buttons (Agent only) ──
+  // Re-verify: agent must be active; non-agent roles blocked.
+
+  // "🔄 Relink Promoter" button on Agent panel → start session
+  if (data === 'relink_promoter_start') {
+    const auditSvcRelink = require('./services/audit');
+    const agentCheck = await db.query(
+      'SELECT id, status FROM agents WHERE telegram_id = $1', [uid]
+    ).then(r => r.rows[0]).catch(() => null);
+    if (!agentCheck || agentCheck.status !== 'active') {
+      await auditSvcRelink.log(uid, 'agent', 'relink_callback_blocked_not_agent', null, 'relink_promoter_start');
+      await ctx.answerCbQuery('Agent only').catch(() => {});
+      return;
+    }
+    await ctx.answerCbQuery().catch(() => {});
+    const session = require('./services/session');
+    session.set(uid, {
+      action: 'relink_promoter_waiting_code',
+      data: {},
+      userRole: 'agent',
+      cancelAudit: 'relink_promoter_cancelled',
+    });
+    await auditSvcRelink.log(uid, 'agent', 'relink_promoter_callback_started', null, null);
+    return ctx.reply('Please enter Promoter Code to regenerate binding link.');
+  }
+
+  // "🔄 Relink <PromoterCode>" inline button on My Promoters list
+  if (data.startsWith('relink_pm_')) {
+    const auditSvcRelink = require('./services/audit');
+    const agentCheck = await db.query(
+      'SELECT id, status FROM agents WHERE telegram_id = $1', [uid]
+    ).then(r => r.rows[0]).catch(() => null);
+    if (!agentCheck || agentCheck.status !== 'active') {
+      await auditSvcRelink.log(uid, 'agent', 'relink_callback_blocked_not_agent', null, data);
+      await ctx.answerCbQuery('Agent only').catch(() => {});
+      return;
+    }
+    const promoterCode = data.replace('relink_pm_', '');
+    await ctx.answerCbQuery().catch(() => {});
+    return handleRelinkPromoterCallback(ctx, promoterCode);
   }
 
   // Export confirmation

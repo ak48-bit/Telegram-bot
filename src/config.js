@@ -58,6 +58,10 @@ const config = {
   GAME_ACCOUNT_API_USER_AGENT: process.env.GAME_ACCOUNT_API_USER_AGENT || 'Mozilla/5.0',
   GAME_ACCOUNT_API_TAC_TRACE_ID: process.env.GAME_ACCOUNT_API_TAC_TRACE_ID || '',
 
+  // ── Platform Game Registration Check (post-submit) ──
+  WJ_API_AUTHORIZATION: process.env.WJ_API_AUTHORIZATION || '',
+  WJ_API_COOKIE: process.env.WJ_API_COOKIE || '',
+
   // Command button whitelist — which commands can be triggered via cmd: callback
   CALLBACK_COMMAND_WHITELIST: {
     admin: ['/admin', '/add_agent', '/list_agents', '/list_promoters', '/list_players',

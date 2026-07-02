@@ -16,13 +16,14 @@ const {
   handleApproveAgentCb, handleRejectAgentCb,
   handleSystemStatus, handleAuditRecent,
   handleFindPlayer, handleFindPromoter, handleFindAgent,
-  handleAdminPanelButtons,
+  handleAdminPanelButtons, handleCheckGame,
 } = require('./handlers/admin');
 const {
   handleAgent, handleAddPromoter, handleListMyPromoters,
   handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
   handleSetAgentLink, handleMyAgentLink, handleAgentSetPromoCompat,
   handleUpdatePromoterLink, handleRelinkPromoterCallback,
+  handleCheckMyGame,
 } = require('./handlers/agent');
 const {
   handlePromoter, handleMyLink, handleMyPlayers, handleMyToday,
@@ -78,6 +79,7 @@ bot.command('audit_recent', requireRole('admin'), handleAuditRecent);
 bot.command('find_player', requireRole('admin'), handleFindPlayer);
 bot.command('find_promoter', requireRole('admin'), handleFindPromoter);
 bot.command('find_agent', requireRole('admin'), handleFindAgent);
+bot.command('check_game', requireRole('admin'), handleCheckGame);
 
 // Agent
 bot.command('agent', requireRole('agent'), handleAgent);
@@ -89,6 +91,7 @@ bot.command('relink_pm', requireRole('agent'), handleRelinkPromoter);
 bot.command('set_agent_link', requireRole('agent'), handleSetAgentLink);
 bot.command('my_agent_link', requireRole('agent'), handleMyAgentLink);
 bot.command('update_promoter_link', requireRole('agent'), handleUpdatePromoterLink);
+bot.command('check_my_game', requireRole('agent'), handleCheckMyGame);
 
 // Agent + Promoter shared legacy
 bot.command('set_promo', requireRole('agent', 'promoter'), async (ctx) => {

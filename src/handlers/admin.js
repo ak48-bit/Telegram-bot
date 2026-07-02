@@ -247,7 +247,9 @@ async function handleListPlayers(ctx) {
   for (const r of res.rows) {
     const tg = r.telegram_id ? `<code>${r.telegram_id}</code>` : '-';
     const un = r.username ? `@${r.username}` : '-';
-    lines.push(`${un} | TG: ${tg} | PM: ${r.promoter_code || '-'} | Agent: ${r.agent_code || '-'} | GameID: ${r.game_id || '-'}`);
+    const regStatus = r.registration_status;
+    const regIcon = regStatus === 'registered' ? 'Reg: ✅' : regStatus === 'not_found' ? 'Reg: ⚠️' : 'Reg: ⏳';
+    lines.push(`${un} | TG: ${tg} | PM: ${r.promoter_code || '-'} | Agent: ${r.agent_code || '-'} | GameID: ${r.game_id || '-'} | ${regIcon}`);
   }
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
@@ -356,9 +358,10 @@ async function handleListPending(ctx) {
      ORDER BY p.created_at DESC LIMIT 30`
   );
   if (res.rows.length === 0) return ctx.reply('No Game IDs submitted yet.');
-  const lines = ['🎮 <b>Submitted Game IDs (record only)</b>\n'];
+  const lines = ['🎮 <b>Submitted Game IDs</b>\n'];
   for (const r of res.rows) {
-    lines.push(`TG: <code>${r.telegram_id}</code> | Game ID: <code>${r.game_id}</code> | ${r.game_id_status}`);
+    const regIcon = r.registration_status === 'registered' ? 'Reg: ✅' : r.registration_status === 'not_found' ? 'Reg: ⚠️' : 'Reg: ⏳';
+    lines.push(`TG: <code>${r.telegram_id}</code> | Game ID: <code>${r.game_id}</code> | ${r.game_id_status} | ${regIcon}`);
   }
   lines.push('\n<i>Game ID review is disabled. Submitted Game IDs are for record only.</i>');
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
@@ -758,12 +761,15 @@ async function handleFindPlayer(ctx) {
   }
   if (player.rows.length === 0) return ctx.reply('Player not found.');
   const p = player.rows[0];
+  const regLabel = p.registration_status === 'registered' ? 'Registered ✅' : p.registration_status === 'not_found' ? 'Not Found ⚠️' : 'Pending ⏳';
   return ctx.reply(
     `🔍 <b>Player Found</b>\n\n` +
     `TG ID: <code>${p.telegram_id}</code>\n` +
     `Username: @${p.username || '-'}\n` +
     `Game ID: <code>${p.game_id || '-'}</code>\n` +
     `Status: ${p.game_id_status || '-'}\n` +
+    `Registration: ${regLabel}\n` +
+    (p.platform_customer_id ? `Platform ID: <code>${p.platform_customer_id}</code>\n` : '') +
     `Promoter: ${p.promoter_code || '-'} (${p.promoter_name || '-'})\n` +
     `Agent: ${p.agent_code || '-'} (${p.agent_name || '-'})\n` +
     `Created: ${p.created_at ? new Date(p.created_at).toISOString().slice(0, 10) : '-'}`,
@@ -823,6 +829,31 @@ async function handleFindAgent(ctx) {
   );
 }
 
+// /check_game <GAME_ID> — Admin manually check Game ID registration
+async function handleCheckGame(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: <code>/check_game GAMEID</code>', { parse_mode: 'HTML' });
+  const gameId = parts[1].trim().toUpperCase();
+  const { manualCheck } = require('../services/platformGameCheck');
+  const { result, syncedPlayers } = await manualCheck(gameId);
+
+  let msg = `🔍 <b>Platform Check: ${escapeHtml(gameId)}</b>\n\n`;
+  if (result.status === 'registered') {
+    msg += `✅ <b>Registered</b>\n`;
+    msg += `Customer ID: <code>${result.customerId || '-'}</code>\n`;
+    msg += `Username: ${result.customerName || '-'}\n`;
+    msg += `Nickname: ${result.nickname || '-'}\n`;
+  } else if (result.status === 'not_found') {
+    msg += `⚠️ <b>Not Found</b>\n`;
+  } else if (result.status === 'api_error') {
+    msg += `⏳ <b>API Error</b>\nError: ${result.error || 'Unknown'}\n`;
+  } else {
+    msg += `⏳ <b>Pending Check</b>\n${result.error || ''}\n`;
+  }
+  if (syncedPlayers > 0) msg += `\n<i>Synced ${syncedPlayers} player record(s).</i>`;
+  return ctx.reply(msg, { parse_mode: 'HTML' });
+}
+
 module.exports = {
   handleAdmin, handleAddAgent, handleListAgents, handleListPromoters,
   handleListPlayers, handleBlockAgent, handleBlockPromoter, handleBlockPlayer,
@@ -834,5 +865,5 @@ module.exports = {
   handleApproveAgentCb, handleRejectAgentCb,
   handleSystemStatus, handleAuditRecent,
   handleFindPlayer, handleFindPromoter, handleFindAgent,
-  handleAdminPanelButtons,
+  handleAdminPanelButtons, handleCheckGame,
 };

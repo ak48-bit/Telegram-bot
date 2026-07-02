@@ -128,7 +128,8 @@ async function handleMyPlayers(ctx) {
   const lines = [`<b>My Players</b> — Page ${page}/${totalPages} (Total: ${total})\n`];
   for (const r of res.rows) {
     const un = r.username ? `@${r.username}` : '-';
-    lines.push(`${un} | TG: <code>${r.telegram_id}</code> | GameID: ${r.game_id || '-'} | ${r.game_id_status || 'pending'}`);
+    const regIcon = r.registration_status === 'registered' ? 'Reg: ✅' : r.registration_status === 'not_found' ? 'Reg: ⚠️' : 'Reg: ⏳';
+    lines.push(`${un} | TG: <code>${r.telegram_id}</code> | GameID: ${r.game_id || '-'} | ${r.game_id_status || 'pending'} | ${regIcon}`);
   }
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }

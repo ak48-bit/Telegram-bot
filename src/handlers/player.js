@@ -3,6 +3,7 @@ const db = require('../db');
 const audit = require('../services/audit');
 const config = require('../config');
 const { checkGameAccount } = require('../services/gameAccountApi');
+const { checkAndPersistRegistration } = require('../services/platformGameCheck');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 
@@ -112,11 +113,32 @@ async function handleSubmit(ctx) {
   }
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId, api_status: apiResult.status, source: apiResult.source });
 
+  // ── Platform registration check (post-submit) ──
+  const regResult = await checkAndPersistRegistration(uid, gameId);
+
+  let regText = '';
+  if (regResult.status === 'registered') {
+    regText = '\n✅ Platform registration verified.';
+  } else if (regResult.status === 'not_found') {
+    regText = '\n⚠️ Platform registration not found.\nPlease check your Game ID or contact support.';
+  } else {
+    // api_error or pending_check
+    regText = '\n⏳ Platform registration check pending.';
+  }
+
   const verifiedText = apiResult.status === 'verified'
     ? '\n✅ Game ID verified successfully.\nYour account has been found in the game backend.'
     : '\n✅ Game ID submitted successfully.';
+
+  const regLabel = regResult.status === 'registered' ? 'Registered' : regResult.status === 'not_found' ? 'Not Found' : 'Pending Check';
+
   return ctx.reply(
-    `🎮 <b>Game ID Submitted</b>\n\n<code>/submit ${escapeHtml(gameId)}</code>\n${verifiedText}\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`,
+    `🎮 <b>Game ID Submitted</b>\n\n` +
+    `<code>/submit ${escapeHtml(gameId)}</code>\n` +
+    `${verifiedText}\n` +
+    `Registration：${regLabel}${regText}\n\n` +
+    `Your participation information has been recorded.\n` +
+    `Rewards are claimed in-game according to the activity rules.`,
     { parse_mode: 'HTML' }
   );
 }

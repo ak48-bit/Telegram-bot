@@ -336,7 +336,8 @@ async function handleListMyPlayers(ctx) {
   const lines = [`<b>My Players</b> — Page ${page}/${totalPages} (Total: ${total})\n`];
   for (const r of res.rows) {
     const un = r.username ? `@${r.username}` : '-';
-    lines.push(`${un} | TG: <code>${r.telegram_id}</code> | PM: ${r.promoter_code || '-'} | GameID: ${r.game_id || '-'}`);
+    const regIcon = r.registration_status === 'registered' ? 'Reg: ✅' : r.registration_status === 'not_found' ? 'Reg: ⚠️' : 'Reg: ⏳';
+    lines.push(`${un} | TG: <code>${r.telegram_id}</code> | PM: ${r.promoter_code || '-'} | GameID: ${r.game_id || '-'} | ${regIcon}`);
   }
   return ctx.reply(lines.join('\n'), { parse_mode: 'HTML' });
 }
@@ -512,10 +513,48 @@ async function handleAgentSetPromoCompat(ctx) {
   return handleSetAgentLink(ctx);
 }
 
+// /check_my_game <GAME_ID> — Agent check Game ID registration for own players
+async function handleCheckMyGame(ctx) {
+  const uid = ctx.from.id;
+  const parts = ctx.message.text.trim().split(/\s+/);
+  if (parts.length < 2) return ctx.reply('Format: <code>/check_my_game GAMEID</code>', { parse_mode: 'HTML' });
+  const gameId = parts[1].trim().toUpperCase();
+
+  const ag = await db.query('SELECT id FROM agents WHERE telegram_id = $1 AND status = $2', [uid, 'active']);
+  if (ag.rows.length === 0) return ctx.reply('Agent not bound or blocked.');
+
+  // Verify player belongs to this agent
+  const player = await db.query(
+    'SELECT telegram_id FROM players WHERE game_id_normalized = $1 AND agent_id = $2',
+    [gameId, ag.rows[0].id]
+  );
+  if (player.rows.length === 0) {
+    return ctx.reply(`No player with Game ID <code>${escapeHtml(gameId)}</code> found under your account.`, { parse_mode: 'HTML' });
+  }
+
+  const { manualCheck } = require('../services/platformGameCheck');
+  const { result, syncedPlayers } = await manualCheck(gameId);
+
+  let msg = `🔍 <b>Platform Check: ${escapeHtml(gameId)}</b>\n\n`;
+  if (result.status === 'registered') {
+    msg += `✅ <b>Registered</b>\n`;
+    msg += `Customer ID: <code>${result.customerId || '-'}</code>\n`;
+    msg += `Username: ${result.customerName || '-'}\n`;
+    msg += `Nickname: ${result.nickname || '-'}\n`;
+  } else if (result.status === 'not_found') {
+    msg += `⚠️ <b>Not Found</b>\n`;
+  } else if (result.status === 'api_error') {
+    msg += `⏳ <b>API Error</b>\nError: ${result.error || 'Unknown'}\n`;
+  } else {
+    msg += `⏳ <b>Pending Check</b>\n${result.error || ''}\n`;
+  }
+  return ctx.reply(msg, { parse_mode: 'HTML' });
+}
+
 module.exports = {
   handleAgent, handleAddPromoter, handleListMyPromoters,
   handleListMyPlayers, handleExportMyPlayers, handleRelinkPromoter,
   handleSetAgentLink, handleMyAgentLink, handleAgentSetPromoCompat,
   handleUpdatePromoterLink, handleRelinkPromoterCallback,
-  relinkPromoterCore,
+  relinkPromoterCore, handleCheckMyGame,
 };

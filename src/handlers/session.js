@@ -10,6 +10,7 @@ const { createInviteToken } = require('../services/token');
 const db = require('../db');
 const config = require('../config');
 const { checkGameAccount } = require('../services/gameAccountApi');
+const { checkAndPersistRegistration } = require('../services/platformGameCheck');
 
 const BOT_USERNAME = process.env.BOT_USERNAME || 'PH90WFH_Bonus_bot';
 const GAME_ID_REGEX = new RegExp(config.GAME_ID_REGEX);
@@ -315,12 +316,36 @@ async function stepSubmitGameId(ctx, s, text) {
 
   await db.query(`UPDATE players SET game_id = $1, game_id_normalized = $2, game_id_status = 'submitted', player_share_code = COALESCE(player_share_code, $2), updated_at = NOW() WHERE telegram_id = $3`, [gameId, gameId, uid]);
   await audit.log(uid, 'player', 'submit_game_id', 'player', String(uid), { game_id: gameId, api_status: apiResult.status, source: apiResult.source });
+
+  // ── Platform registration check (post-submit) ──
+  const regResult = await checkAndPersistRegistration(uid, gameId);
+
   session.delete(uid);
+
+  let regText = '';
+  if (regResult.status === 'registered') {
+    regText = '\n✅ Platform registration verified.';
+  } else if (regResult.status === 'not_found') {
+    regText = '\n⚠️ Platform registration not found.\nPlease check your Game ID or contact support.';
+  } else {
+    regText = '\n⏳ Platform registration check pending.';
+  }
 
   const verifiedText = apiResult.status === 'verified'
     ? '\n✅ Game ID verified successfully.\nYour account has been found in the game backend.'
     : '\n✅ Game ID submitted successfully.';
-  return ctx.reply(`🎮 <b>Game ID Submitted</b>\n\n/submit ${gameId}\n${verifiedText}\nYour participation information has been recorded.\nRewards are claimed in-game according to the activity rules.`, { parse_mode: 'HTML' });
+
+  const regLabel = regResult.status === 'registered' ? 'Registered' : regResult.status === 'not_found' ? 'Not Found' : 'Pending Check';
+
+  return ctx.reply(
+    `🎮 <b>Game ID Submitted</b>\n\n` +
+    `/submit ${gameId}\n` +
+    `${verifiedText}\n` +
+    `Registration：${regLabel}${regText}\n\n` +
+    `Your participation information has been recorded.\n` +
+    `Rewards are claimed in-game according to the activity rules.`,
+    { parse_mode: 'HTML' }
+  );
 }
 
 // ── Agent Self-Application Step Handlers ──

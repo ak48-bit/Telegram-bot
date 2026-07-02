@@ -38,7 +38,12 @@ async function checkGameRegistration(gameId) {
 
   const headers = {
     'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Authorization': config.WJ_API_AUTHORIZATION,
+    'Connection': 'keep-alive',
+    'Origin': config.WJ_API_ORIGIN || 'https://www.wj-safety.com',
+    'Referer': config.WJ_API_REFERER || 'https://www.wj-safety.com/',
+    'User-Agent': config.WJ_API_USER_AGENT || 'Mozilla/5.0',
   };
   if (config.WJ_API_COOKIE) headers['Cookie'] = config.WJ_API_COOKIE;
 
@@ -52,7 +57,9 @@ async function checkGameRegistration(gameId) {
     });
 
     if (!response.ok) {
-      console.error(`[PlatformCheck] HTTP ${response.status} for ${gameId}`);
+      let bodySnippet = '';
+      try { const t = await response.text(); bodySnippet = t.slice(0, 300); } catch (_) {}
+      console.error(`[PlatformCheck] HTTP ${response.status} for ${gameId} body: ${bodySnippet}`);
       return { status: 'api_error', error: `HTTP ${response.status}` };
     }
 

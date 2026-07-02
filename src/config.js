@@ -61,6 +61,9 @@ const config = {
   // ── Platform Game Registration Check (post-submit) ──
   WJ_API_AUTHORIZATION: process.env.WJ_API_AUTHORIZATION || '',
   WJ_API_COOKIE: process.env.WJ_API_COOKIE || '',
+  WJ_API_USER_AGENT: process.env.WJ_API_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+  WJ_API_REFERER: process.env.WJ_API_REFERER || 'https://www.wj-safety.com/',
+  WJ_API_ORIGIN: process.env.WJ_API_ORIGIN || 'https://www.wj-safety.com',
 
   // Command button whitelist — which commands can be triggered via cmd: callback
   CALLBACK_COMMAND_WHITELIST: {

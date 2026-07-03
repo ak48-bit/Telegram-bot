@@ -27,7 +27,7 @@ async function checkGameRegistration(gameId) {
   }
 
   const params = new URLSearchParams();
-  params.set('merchantCode', 'ph90tlbf5');
+  params.set('merchantCode', config.PLATFORM_MERCHANT_CODE);
   params.set('isWildcard', 'false');
   params.set('size', '10');
   params.set('page', '1');

@@ -59,6 +59,7 @@ const config = {
   GAME_ACCOUNT_API_TAC_TRACE_ID: process.env.GAME_ACCOUNT_API_TAC_TRACE_ID || '',
 
   // ── Platform Game Registration Check (post-submit) ──
+  PLATFORM_MERCHANT_CODE: process.env.PLATFORM_MERCHANT_CODE || process.env.GAME_ACCOUNT_API_MERCHANT_CODE || 'ph90tlbf5',
   WJ_API_AUTHORIZATION: process.env.WJ_API_AUTHORIZATION || '',
   WJ_API_COOKIE: process.env.WJ_API_COOKIE || '',
   WJ_API_USER_AGENT: process.env.WJ_API_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',

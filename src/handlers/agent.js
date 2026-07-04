@@ -515,6 +515,11 @@ async function handleAgentSetPromoCompat(ctx) {
 
 // /check_my_game <GAME_ID> — Agent check Game ID registration for own players
 async function handleCheckMyGame(ctx) {
+  if (!config.GAME_ACCOUNT_API_ENABLED) {
+    return ctx.reply(
+      'Backend game account verification is currently disabled.\nGame ID submissions are recorded in Bot only.'
+    );
+  }
   const uid = ctx.from.id;
   const parts = ctx.message.text.trim().split(/\s+/);
   if (parts.length < 2) return ctx.reply('Format: <code>/check_my_game GAMEID</code>', { parse_mode: 'HTML' });

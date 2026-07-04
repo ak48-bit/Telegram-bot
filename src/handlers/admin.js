@@ -831,6 +831,11 @@ async function handleFindAgent(ctx) {
 
 // /check_game <GAME_ID> — Admin manually check Game ID registration
 async function handleCheckGame(ctx) {
+  if (!config.GAME_ACCOUNT_API_ENABLED) {
+    return ctx.reply(
+      'Backend game account verification is currently disabled.\nGame ID submissions are recorded in Bot only.'
+    );
+  }
   const parts = ctx.message.text.trim().split(/\s+/);
   if (parts.length < 2) return ctx.reply('Format: <code>/check_game GAMEID</code>', { parse_mode: 'HTML' });
   const gameId = parts[1].trim().toUpperCase();

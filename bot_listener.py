@@ -292,7 +292,17 @@ def run_push(date=None, month=None, sections=None):
         return f"执行失败: {e}"
 
 
-DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+# Read DATA_FOLDER from config.json (with fallback for backward compat)
+try:
+    import json as _json
+    _cfg_tmp = None
+    _cfg_path = os.path.join(SCRIPT_DIR, "config.json")
+    if os.path.exists(_cfg_path):
+        with open(_cfg_path, "r", encoding="utf-8") as _f:
+            _cfg_tmp = _json.load(_f)
+    DATA_FOLDER = _cfg_tmp.get("data_folder", r"C:\Users\ak481\OneDrive\Desktop\新建文件夹") if _cfg_tmp else r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+except Exception:
+    DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
 BACKUP_DIR = os.path.join(DATA_FOLDER, "备份")
 
 

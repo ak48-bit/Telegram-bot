@@ -16,7 +16,7 @@ def load_config():
             return json.load(f)
     return {}
 CONFIG = load_config()
-DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+DATA_FOLDER = CONFIG.get("data_folder", r"C:\Users\ak481\OneDrive\Desktop\新建文件夹")
 
 # ── Unified platform config (single source of truth) ──
 import _platform_config as _plat

@@ -23,10 +23,10 @@
     "fraud_alerts": true,
     "price_summary": true
   },
-  "inactive_platforms": ["PH09-2", "PH05", "PH16", "BD02"],
+  "inactive_platforms": ["PH09-2", "PH05", "PH16", "BD02", "BD05", "MM01"],
   "development_platforms": ["PH09", "PH25", "PH18", "PH30", "PH35"],
   "hijack_platforms": ["PH33"],
-  "disabled_platforms": ["PH09-2", "PH05", "PH16", "BD02"],
+  "disabled_platforms": ["PH09-2", "PH05", "PH16", "BD02", "BD05", "MM01"],
   "platform_rows": {
     "PH09":   { "daily_row": 5,  "monthly_row": 4  },
     "PH09-2": { "daily_row": 6,  "monthly_row": 5  },

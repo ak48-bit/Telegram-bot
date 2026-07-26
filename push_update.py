@@ -398,7 +398,7 @@ def read_headcount(wb):
 def read_ground_push_daily(wb):
     """Read today's ground push data from 当日汇总 sheet.
 
-    Returns dict {site_name: data_dict} for all 10 platforms with all 28 columns.
+    Returns dict {site_name: data_dict} for all configured platforms with 28 columns.
     """
     # Find 当日汇总 sheet (index 3, may have garbled name)
     target_sn = None
@@ -1579,7 +1579,7 @@ def _daily_to_28row(name, d):
 
 
 def build_daily_full_image(today, latest_date):
-    """Single wide image with all 28 columns x 10 platforms."""
+    """Single wide image with all 28 columns x development platforms."""
     rows = []
     for name in ALL_PLATFORMS:
         if name not in today:
@@ -1591,7 +1591,7 @@ def build_daily_full_image(today, latest_date):
 
 
 def build_monthly_full_image(monthly_full, latest_date):
-    """Single wide image with all 28 columns x 10 platforms (monthly cumulative)."""
+    """Single wide image with all 28 columns x development platforms (monthly cumulative)."""
     if not monthly_full:
         return None
     rows = []
@@ -2385,12 +2385,16 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
     box_table = build_box_table(today)
 
     # ── Region summary lines ──
-    summary_ph = f"菲区首存{ph_ftd}人/首存{fmt_k(ph_ftd_amt)}/充提差{fmt_k_signed(ph_diff)}"
-    summary_bd = f"孟区首存{bd_ftd}人/充提差{fmt_k_signed(bd_diff)}"
-    summary_mm = f"缅区首存{mm_ftd}人/充提差{fmt_k_signed(mm_diff)}"
+    # Region summaries — only include regions with active platforms
+    region_parts = [f"菲区首存{ph_ftd}人/首存{fmt_k(ph_ftd_amt)}/充提差{fmt_k_signed(ph_diff)}"]
+    if BD_PLATFORMS:
+        region_parts.append(f"孟区首存{bd_ftd}人/充提差{fmt_k_signed(bd_diff)}")
+    if MM_PLATFORMS:
+        region_parts.append(f"缅区首存{mm_ftd}人/充提差{fmt_k_signed(mm_diff)}")
+    summary_region = "，".join(region_parts)
     summary_all = f"整体充提差{fmt_k_signed(total_diff)}"
 
-    # ── Anomaly sites (ALL 10 sites) ──
+    # ── Anomaly sites (active development platforms only) ──
     anomaly_lines = []
     for name in ALL_PLATFORMS:
         if name not in today:
@@ -2410,7 +2414,7 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
             reasons.append("正常")
         anomaly_lines.append(f"{icon} {name}: FTD={d['ftd']} DPS={d['dps_ppl']} WDR={d['wdr_ppl']} ({', '.join(reasons)})")
 
-    # ── Fraud alerts (ALL 10 sites) ──
+    # ── Fraud alerts (active development platforms only) ──
     fraud_lines = []
     for name in ALL_PLATFORMS:
         if name not in today:
@@ -2467,7 +2471,7 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
 {box_table}
 ```
 
-> {summary_ph}，{summary_bd}，{summary_mm}。{summary_all}。
+> {summary_region}。{summary_all}。
 
 ## 编制与人效
 {chr(10).join(hc_lines)}
@@ -2572,7 +2576,7 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
     # Part 1: Box table (only if daily_table section is on)
     if sections.get("daily_table", True):
         daily_title = titles.get("daily", "线上办公数据汇总")
-        tg_parts.append(f"📊 {daily_title} — {latest_date}\n\n<pre>{box_table}</pre>\n\n{summary_ph}\n{summary_bd}\n{summary_mm}\n{summary_all}")
+        tg_parts.append(f"📊 {daily_title} — {latest_date}\n\n<pre>{box_table}</pre>\n\n{summary_region}\n{summary_all}")
 
     # Part 2: Fraud alerts only (DoD + anomalies are image-only)
     if sections.get("fraud_alerts", True) and fraud_lines:

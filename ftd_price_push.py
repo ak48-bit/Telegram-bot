@@ -1,10 +1,13 @@
 import openpyxl
 from datetime import datetime
 
+# ── Unified platform config (now includes MM01 which was previously missing) ──
+import _platform_config as _plat
+
 EXCEL_FILE = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹\26年04月 线上办公数据汇.xlsx"
 TARGET_DIR = r"C:\Users\ak481\OneDrive\Desktop\ak 线上办公部门skills建议和调用"
 
-PLATFORMS = ["PH09", "PH09-2", "PH25", "PH18", "PH30", "PH05", "PH16", "BD02", "BD05"]
+PLATFORMS = _plat.get_development_platforms()
 
 wb = openpyxl.load_workbook(EXCEL_FILE, data_only=True)
 

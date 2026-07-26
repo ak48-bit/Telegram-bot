@@ -18,6 +18,23 @@ def load_config():
 CONFIG = load_config()
 DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
 
+# ── Unified platform config (single source of truth) ──
+import _platform_config as _plat
+
+# These module-level variables are computed once from config.json:
+#   ALL_PLATFORMS      — active (enabled=true) platform codes, region-ordered
+#   PH_PLATFORMS       — active PH platforms
+#   BD_PLATFORMS       — active BD platforms
+#   MM_PLATFORMS       — active MM platforms
+#   DAILY_ROW_MAP      — {code: row} for ALL platforms on 当日汇总 sheet
+#   MONTHLY_ROW_MAP    — {code: row} for ALL platforms on monthly cost sheet
+ALL_PLATFORMS   = _plat.get_development_platforms()
+PH_PLATFORMS    = _plat.get_platforms_by_region("PH")
+BD_PLATFORMS    = _plat.get_platforms_by_region("BD")
+MM_PLATFORMS    = _plat.get_platforms_by_region("MM")
+DAILY_ROW_MAP   = _plat.get_daily_row_map()
+MONTHLY_ROW_MAP = _plat.get_monthly_row_map()
+
 
 def find_monthly_file(target_date, keywords, exclude_kw=None):
     """Find Excel file in DATA_FOLDER matching year+month and keywords."""
@@ -45,8 +62,8 @@ def find_monthly_file(target_date, keywords, exclude_kw=None):
     for f in sorted(os.listdir(DATA_FOLDER)):
         if not f.endswith('.xlsx'):
             continue
-        # Skip backup copies
-        if '副本' in f or ' - Copy' in f:
+        # Skip backup copies and Excel lock files
+        if '副本' in f or ' - Copy' in f or f.startswith('~$'):
             continue
         # Normalize brackets
         fname = f.replace("（", "(").replace("）", ")")
@@ -82,11 +99,6 @@ def find_monthly_file(target_date, keywords, exclude_kw=None):
 
 TELEGRAM_BOT_TOKEN = "8731392429:AAFb6QywB4NG4TDTmeOtzDbS7IR_G95JzAI"
 TELEGRAM_CHAT_ID = "-1003899337250"
-
-PH_PLATFORMS = ["PH09", "PH09-2", "PH25", "PH18", "PH30", "PH05", "PH16"]
-BD_PLATFORMS = ["BD02", "BD05"]
-MM_PLATFORMS = ["MM01"]
-ALL_PLATFORMS = PH_PLATFORMS + BD_PLATFORMS + MM_PLATFORMS
 
 # Column display widths (visual)
 COLS = [
@@ -399,11 +411,8 @@ def read_ground_push_daily(wb):
         return None
 
     ws = wb[target_sn]
-    site_rows = {
-        "PH09": 5, "PH09-2": 6, "PH25": 7, "PH18": 8, "PH30": 9, "PH05": 10, "PH16": 11,
-        "BD02": 17, "BD05": 18,
-        "MM01": 23,
-    }
+    # Use unified platform config for row mapping (reads ALL platforms)
+    site_rows = DAILY_ROW_MAP
     today = {}
     for name, row in site_rows.items():
         c = lambda col: _cell_float(ws, row, col)
@@ -467,8 +476,9 @@ def read_ground_push_daily(wb):
 # ── Price Summary ───────────────────────────────────────────────────
 
 def read_price_summary(wb):
-    """Read 单价汇总 sheet, return formatted text with ceiled values."""
-    # Find 单价汇总 sheet
+    """Read 单价汇总 sheet, return formatted text with ceiled values.
+    Dynamically finds platform rows by scanning cell content instead of
+    hardcoded row numbers, so the sheet layout can vary month to month."""
     target = None
     for sn in wb.sheetnames:
         if "单价" in sn or "單價" in sn:
@@ -479,53 +489,97 @@ def read_price_summary(wb):
     import math
     ws = wb[target]
     c2 = lambda row: ws.cell(row=row, column=2).value
+    c1 = lambda row: ws.cell(row=row, column=1).value
 
+    # Extract month from row 2 (e.g. "2026/06/" → "06")
+    date_raw = str(c1(2) or "") + str(c2(2) or "")
+    month_str = ""
+    for part in date_raw.split("/"):
+        if len(part) == 2 and part.isdigit():
+            month_str = part
+            break
+    if not month_str:
+        month_str = "06"
     day = c2(2) or ""
+
     lines = [
         "单价汇总",
-        f"2026/05/{day}",
+        f"2026/{month_str}/{day}",
         "",
         "线上办公部门",
         f"内部编制: {c2(5)}",
         f"菲律宾总编制: {c2(6)}",
         f"孟加拉总编制: {c2(7)}",
-        "─" * 40,
-        "菲律宾",
-        "",
     ]
 
-    for name, row in [("PH09", 12), ("PH09-2", 16), ("PH25", 20),
-                       ("PH18", 24), ("PH30", 28), ("PH05", 32), ("PH16", 36)]:
-        ftd = c2(row + 1) or 0
-        price = c2(row + 2) or 0
-        try:
-            price = math.ceil(float(price))
-        except (ValueError, TypeError):
-            price = 0
-        lines.append(name)
-        lines.append(f"首存人数: {ftd}")
-        lines.append(f"新客单价: {price}")
+    # Dynamically find platform rows by scanning the sheet
+    platform_map = {}  # {name: row_number}
+    for row_idx in range(1, ws.max_row + 1):
+        val = c1(row_idx)
+        if val is None:
+            continue
+        s = str(val).strip()
+        # Match platform codes in cell text
+        for plat in _plat.get_all_configured_platforms():
+            code = plat[-2:]  # last 2 chars
+            if code in s:
+                platform_map[plat] = row_idx
+                break
+
+    # PH section — only active platforms
+    ph_active = [p for p in PH_PLATFORMS if p in platform_map]
+    if ph_active:
+        lines.append("─" * 40)
+        lines.append("菲律宾")
         lines.append("")
+        for name in ph_active:
+            row = platform_map[name]
+            ftd = c2(row + 1) or 0
+            price = c2(row + 2) or 0
+            try:
+                price = math.ceil(float(price))
+            except (ValueError, TypeError):
+                price = 0
+            lines.append(name)
+            lines.append(f"首存人数: {ftd}")
+            lines.append(f"新客单价: {price}")
+            lines.append("")
+
+    # BD section
+    bd_active = [p for p in BD_PLATFORMS if p in platform_map]
+    if bd_active:
+        lines.append("─" * 40)
+        lines.append("孟加拉")
+        lines.append("")
+        for name in bd_active:
+            row = platform_map[name]
+            ftd = c2(row + 1) or 0
+            price = c2(row + 2) or 0
+            try:
+                price = math.ceil(float(price))
+            except (ValueError, TypeError):
+                price = 0
+            lines.append(name)
+            lines.append(f"首存人数: {ftd}")
+            lines.append(f"新客单价: {price}")
+            lines.append("")
+
+    # Summary totals — find by scanning for keywords
+    ph_total = "N/A"
+    bd_total = "N/A"
+    for row_idx in range(1, ws.max_row + 1):
+        val = c1(row_idx)
+        if val is None:
+            continue
+        s = str(val).strip()
+        if "菲律宾首存" in s or "菲律宾" in s and "首存" in s:
+            ph_total = c2(row_idx) or "N/A"
+        if "孟加拉首存" in s or "孟加拉" in s and "首存" in s:
+            bd_total = c2(row_idx) or "N/A"
 
     lines.append("─" * 40)
-    lines.append("孟加拉")
-    lines.append("")
-
-    for name, row in [("BD02", 42), ("BD05", 46)]:
-        ftd = c2(row + 1) or 0
-        price = c2(row + 2) or 0
-        try:
-            price = math.ceil(float(price))
-        except (ValueError, TypeError):
-            price = 0
-        lines.append(name)
-        lines.append(f"首存人数: {ftd}")
-        lines.append(f"新客单价: {price}")
-        lines.append("")
-
-    lines.append("─" * 40)
-    lines.append(f"菲律宾首存人数: {c2(51)}")
-    lines.append(f"孟加拉首存人数: {c2(52)}")
+    lines.append(f"菲律宾首存人数: {ph_total}")
+    lines.append(f"孟加拉首存人数: {bd_total}")
 
     return "\n".join(lines)
 
@@ -741,6 +795,7 @@ def build_hj_full_row_image(title, headers, values):
     TITLE_FG = (33, 37, 41)
     FOOTER_FG = (140, 140, 140)
     DATA_BG = (249, 251, 253)
+    RED_FG = (220, 53, 69)
 
     row_h = 30
     title_h = 44
@@ -779,8 +834,18 @@ def build_hj_full_row_image(title, headers, values):
     for ci, v in enumerate(values):
         cw = col_widths[ci]
         draw.rectangle([x, y, x + cw - 1, y + row_h], fill=DATA_BG, outline=GRID)
-        tw = font_body.getbbox(str(v))[2]
-        draw.text((x + (cw - tw) // 2, y + 6), str(v), fill=TITLE_FG, font=font_body)
+        s = str(v)
+        fg = TITLE_FG
+        neg_test = s.lstrip("-")
+        if s.startswith("-") and neg_test and neg_test != s:
+            clean = neg_test.replace(",", "").replace("K", "").replace("M", "").rstrip("%").strip()
+            try:
+                float(clean)
+                fg = RED_FG
+            except ValueError:
+                pass
+        tw = font_body.getbbox(s)[2]
+        draw.text((x + (cw - tw) // 2, y + 6), s, fill=fg, font=font_body)
         x += cw
 
     footer_text = f"@WFHDPbot | {datetime.now().strftime('%Y-%m-%d %H:%M')}"
@@ -1029,10 +1094,10 @@ def fmt_k(v):
 
 
 def fmt_k_signed(v):
-    """Format with + or - sign."""
+    """Format with sign: negative shows -, positive shows number only (no +)."""
     s = fmt_k(v)
-    if v > 0:
-        return f"+{s}"
+    if v < 0:
+        return s  # already has - from fmt_k
     return s
 
 
@@ -1042,9 +1107,7 @@ def fmt_full(v):
 
 
 def fmt_full_signed(v):
-    """Format with + or - sign, full number."""
-    if v > 0:
-        return f"+{v:,.0f}"
+    """Format full number: negative shows -, positive shows number only (no +)."""
     return f"{v:,.0f}"
 
 
@@ -1253,9 +1316,16 @@ def render_table_image(title, headers, rows, col_widths=None):
             draw.rectangle([x, y, x + cw - 1, y + row_h], fill=bg, outline=GRID)
 
             s = str(val)
-            fg = (33, 37, 41)
-            if is_subtotal:
-                fg = (40, 60, 90)
+            fg = (40, 60, 90) if is_subtotal else (33, 37, 41)
+            # Negative numeric values → red (takes priority over subtotal color)
+            neg_test = s.lstrip("-")
+            if s.startswith("-") and neg_test and neg_test != s:
+                clean = neg_test.replace(",", "").replace("K", "").replace("M", "").rstrip("%").strip()
+                try:
+                    float(clean)
+                    fg = RED_FG
+                except ValueError:
+                    pass
 
             tw = font_body.getbbox(s)[2]
             draw.text((x + (cw - tw) // 2, y + 7), s, fill=fg, font=font_body)
@@ -1555,11 +1625,9 @@ def _fmt_excel(v, is_pct=False):
 
 
 def _fmt_excel_signed(v):
-    """Format with + sign for positive."""
+    """Format value: negative shows -, positive shows number only (no +)."""
     s = _fmt_excel(v)
-    if isinstance(v, (int, float)) and v > 0:
-        return f"+{s}"
-    return s
+    return s  # negative already has - from _fmt_excel
 
 
 def read_daily_sheet_rows(wb):
@@ -1591,37 +1659,39 @@ def read_daily_sheet_rows(wb):
 
     # PH section
     rows.append(("section", "菲律宾 05月", None))
-    ph_sites = [5, 6, 7, 8, 9, 10, 11]  # PH09 to PH16
+    ph_sites = _plat.get_daily_rows("PH")
     for r in ph_sites:
         name = str(ws.cell(row=r, column=1).value or "")
         vals = [_safe_cell(ws, r, c) for c in range(1, 29)]
-        if vals[5] == 0 and vals[6] == 0:  # Skip sites with no register/FTD
+        if vals[4] == 0 and vals[5] == 0:  # Skip empty sites (总注册/总开发人数)  # Skip sites with no register/FTD
             continue
         rows.append(("data", name, vals))
-    # PH subtotal (row 12)
-    r = 12
+    # PH subtotal (last PH daily row + 1)
+    r = ph_sites[-1] + 1 if ph_sites else 12
     rows.append(("subtotal", "PH小计", [_safe_cell(ws, r, c) for c in range(1, 29)]))
 
     # BD section
     rows.append(("section", "孟加拉 05月", None))
-    for r in [17, 18]:
+    bd_daily_sites = _plat.get_daily_rows("BD")
+    for r in bd_daily_sites:
         name = str(ws.cell(row=r, column=1).value or "")
         vals = [_safe_cell(ws, r, c) for c in range(1, 29)]
-        if vals[5] == 0 and vals[6] == 0:
+        if vals[4] == 0 and vals[5] == 0:  # Skip empty sites (总注册/总开发人数)
             continue
         rows.append(("data", name, vals))
-    # BD subtotal (row 19)
-    r = 19
+    # BD subtotal (last BD daily row + 1)
+    r = bd_daily_sites[-1] + 1 if bd_daily_sites else 19
     rows.append(("subtotal", "BD小计", [_safe_cell(ws, r, c) for c in range(1, 29)]))
 
     # MM section
     rows.append(("section", "缅甸 05月", None))
-    r = 23
-    name = str(ws.cell(row=r, column=1).value or "")
-    vals = [_safe_cell(ws, r, c) for c in range(1, 29)]
-    rows.append(("data", name, vals))
-    # MM subtotal (row 24)
-    r = 24
+    mm_daily = _plat.get_daily_rows("MM")
+    for r in mm_daily:
+        name = str(ws.cell(row=r, column=1).value or "")
+        vals = [_safe_cell(ws, r, c) for c in range(1, 29)]
+        rows.append(("data", name, vals))
+    # MM subtotal (MM last row + 1)
+    r = mm_daily[-1] + 1 if mm_daily else 24
     rows.append(("subtotal", "MM小计", [_safe_cell(ws, r, c) for c in range(1, 29)]))
 
     return rows, ws
@@ -1700,37 +1770,40 @@ def read_monthly_sheet_rows(wb):
 
     # PH section (rows 4-16)
     rows.append(("section", "菲律宾 05月", None))
-    for r in [4, 5, 6, 7, 10, 11, 13]:  # PH09,PH09-2,PH25,PH18,PH30,PH05,PH16 (skip inactive 8,9,12)
-        name = str(ws.cell(row=r, column=2).value or "")
-        vals = [_safe_cell(ws, r, c) for c in range(2, 35)]
-        if vals[5] == 0 and vals[6] == 0:  # Skip empty sites
+    ph_monthly_sites = _plat.get_monthly_rows("PH")
+    for r in ph_monthly_sites:
+        name = str(ws.cell(row=r, column=3).value or "")
+        vals = [_safe_cell(ws, r, c) for c in range(4, 37)]
+        if vals[4] == 0 and vals[5] == 0:  # Skip empty sites (总注册/总开发人数)
             continue
         rows.append(("data", name, vals))
-    # PH subtotal (row 16)
-    r = 16
-    rows.append(("subtotal", "PH小计", [_safe_cell(ws, r, c) for c in range(2, 35)]))
+    # PH subtotal (last PH monthly row + 2)
+    r = ph_monthly_sites[-1] + 2 if ph_monthly_sites else 16
+    rows.append(("subtotal", "PH小计", [_safe_cell(ws, r, c) for c in range(4, 37)]))
 
     # BD section (rows 20-26)
     rows.append(("section", "孟加拉 05月", None))
-    for r in [20, 23]:  # BD02, BD05 (skip inactive 19,21,22,24)
-        name = str(ws.cell(row=r, column=2).value or "")
-        vals = [_safe_cell(ws, r, c) for c in range(2, 35)]
-        if vals[5] == 0 and vals[6] == 0:
+    bd_monthly_sites = _plat.get_monthly_rows("BD")
+    for r in bd_monthly_sites:
+        name = str(ws.cell(row=r, column=3).value or "")
+        vals = [_safe_cell(ws, r, c) for c in range(4, 37)]
+        if vals[4] == 0 and vals[5] == 0:  # Skip empty sites (总注册/总开发人数)
             continue
         rows.append(("data", name, vals))
-    # BD subtotal (row 26)
-    r = 26
-    rows.append(("subtotal", "BD小计", [_safe_cell(ws, r, c) for c in range(2, 35)]))
+    # BD subtotal (last BD monthly row + 2)
+    r = bd_monthly_sites[-1] + 2 if bd_monthly_sites else 26
+    rows.append(("subtotal", "BD小计", [_safe_cell(ws, r, c) for c in range(4, 37)]))
 
     # MM section (rows 29-31)
     rows.append(("section", "缅甸 05月", None))
-    r = 29
-    name = str(ws.cell(row=r, column=2).value or "")
-    vals = [_safe_cell(ws, r, c) for c in range(2, 35)]
-    rows.append(("data", name, vals))
-    # MM subtotal (row 31)
-    r = 31
-    rows.append(("subtotal", "MM小计", [_safe_cell(ws, r, c) for c in range(2, 35)]))
+    mm_monthly = _plat.get_monthly_rows("MM")
+    for r in mm_monthly:
+        name = str(ws.cell(row=r, column=3).value or "")
+        vals = [_safe_cell(ws, r, c) for c in range(4, 37)]
+        rows.append(("data", name, vals))
+    # MM subtotal (MM last row + 2)
+    r = mm_monthly[-1] + 2 if mm_monthly else 31
+    rows.append(("subtotal", "MM小计", [_safe_cell(ws, r, c) for c in range(4, 37)]))
 
     return rows
 
@@ -1743,38 +1816,38 @@ def _monthly_row_to_display(rows):
             display_rows.append([label] + [""] * (len(MONTHLY_33_HEADERS) - 1))
         elif row_type == "data" or row_type == "subtotal":
             rv = [
-                label,  # 平台
-                _fmt_excel(vals[1]),   # 现场人员
-                _fmt_excel(vals[2]),   # 现场转线上
-                _fmt_excel(vals[3]),   # 投放费用
-                _fmt_excel(vals[4]),   # 人均开发
-                _fmt_excel(vals[5]),   # 总注册
-                _fmt_excel(vals[6]),   # 总开发人数
-                _fmt_excel(vals[7]),   # 首存金额
-                _fmt_excel(vals[8]),   # 首存总金额
-                _fmt_excel(vals[9]),   # 首提总金额
-                _fmt_excel(vals[10]),  # 新客总存
-                _fmt_excel(vals[11]),  # 新客总提
-                _fmt_excel_signed(vals[12]),  # 新客存提差
-                _fmt_excel(vals[13]),  # 一级首存
-                _fmt_excel(vals[14]),  # 一级存款
-                _fmt_excel(vals[15]),  # 一级提款
-                _fmt_excel(vals[16]),  # 充值人数
-                _fmt_excel(vals[17]),  # 复存人数
-                _fmt_excel(vals[18]),  # 存款
-                _fmt_excel(vals[19]),  # 提款
-                _fmt_excel_signed(vals[20]),  # 存提差
-                _fmt_excel(vals[21]),  # 线上人员工资
-                _fmt_excel_signed(vals[22]),  # 平台盈亏
-                _fmt_excel(vals[23]),  # 充值手续费
-                _fmt_excel(vals[24]),  # 平台服务费
-                _fmt_excel(vals[25]),  # 现场人员工资
-                _fmt_excel(vals[26]),  # 现场转线上费用
-                _fmt_excel_signed(vals[27]),  # 净利润
-                _fmt_excel(vals[28]),  # 新客客单价
-                _fmt_excel(vals[29]),  # 人均客单价
-                _fmt_excel(vals[30], is_pct=True),  # 支出回报率
-                _fmt_excel(vals[31], is_pct=True),  # 投资回报率
+                label,  # 平台 (now correctly reads from col3)
+                _fmt_excel(vals[0]),   # 现场人员 (col4)
+                _fmt_excel(vals[1]),   # 现场转线上 (col5)
+                _fmt_excel(vals[2]),   # 投放费用 (col6)
+                _fmt_excel(vals[3]),   # 人均开发 (col7)
+                _fmt_excel(vals[4]),   # 总注册 (col8)
+                _fmt_excel(vals[5]),   # 总开发人数 (col9)
+                _fmt_excel(vals[6]),   # 首存金额 (col10)
+                _fmt_excel(vals[7]),   # 首存总金额 (col11)
+                _fmt_excel(vals[8]),   # 首提总金额 (col12)
+                _fmt_excel(vals[9]),   # 新客总存 (col13)
+                _fmt_excel(vals[10]),  # 新客总提 (col14)
+                _fmt_excel_signed(vals[11]),  # 新客存提差 (col15)
+                _fmt_excel(vals[12]),  # 一级首存 (col16)
+                _fmt_excel(vals[13]),  # 一级存款 (col17)
+                _fmt_excel(vals[14]),  # 一级提款 (col18)
+                _fmt_excel(vals[15]),  # 充值人数 (col19)
+                _fmt_excel(vals[16]),  # 复存人数 (col20)
+                _fmt_excel(vals[17]),  # 存款 (col21)
+                _fmt_excel(vals[18]),  # 提款 (col22)
+                _fmt_excel_signed(vals[19]),  # 存提差 (col23)
+                _fmt_excel(vals[20]),  # 线上人员工资 (col24)
+                _fmt_excel_signed(vals[21]),  # 平台盈亏 (col25)
+                _fmt_excel(vals[22]),  # 充值手续费 (col26)
+                _fmt_excel(vals[23]),  # 平台服务费 (col27)
+                _fmt_excel(vals[24]),  # 现场人员工资 (col28)
+                _fmt_excel(vals[25]),  # 现场转线上费用 (col29)
+                _fmt_excel_signed(vals[26]),  # 净利润 (col30)
+                _fmt_excel(vals[27]),  # 新客客单价 (col31)
+                _fmt_excel(vals[28]),  # 人均客单价 (col32)
+                _fmt_excel(vals[29], is_pct=True),  # 支出回报率 (col33)
+                _fmt_excel(vals[30], is_pct=True),  # 投资回报率 (col34)
             ]
             display_rows.append(rv)
     return display_rows
@@ -1935,6 +2008,7 @@ def build_hj_combined_image(hj_office, hj_date_str):
     SECTION_BG = (235, 240, 245)
     SECTION_FG = (60, 80, 100)
     DATA_BG = (249, 251, 253)
+    RED_FG = (220, 53, 69)
 
     row_h = 32
     section_h = 30
@@ -1982,8 +2056,18 @@ def build_hj_combined_image(hj_office, hj_date_str):
         for ci, (h, v) in enumerate(fields):
             cw = col_widths[ci]
             draw.rectangle([x, y, x + cw - 1, y + row_h], fill=DATA_BG, outline=GRID)
-            tw = font_body.getbbox(str(v))[2]
-            draw.text((x + (cw - tw) // 2, y + 7), str(v), fill=TITLE_FG, font=font_body)
+            s = str(v)
+            fg = TITLE_FG
+            neg_test = s.lstrip("-")
+            if s.startswith("-") and neg_test and neg_test != s:
+                clean = neg_test.replace(",", "").replace("K", "").replace("M", "").rstrip("%").strip()
+                try:
+                    float(clean)
+                    fg = RED_FG
+                except ValueError:
+                    pass
+            tw = font_body.getbbox(s)[2]
+            draw.text((x + (cw - tw) // 2, y + 7), s, fill=fg, font=font_body)
             x += cw
         y += row_h
 
@@ -2062,7 +2146,7 @@ def build_dod_image(today, yesterday, prev_date, latest_date):
             name,
             str(y["ftd"]),
             str(t["ftd"]),
-            f"{t['ftd'] - y['ftd']:+d} {trend}",
+            f"{t['ftd'] - y['ftd']:d} {trend}",
             delta_roi(t["roi"], y["roi"]),
             delta_str(t["diff"], y["diff"]),
         ])
@@ -2080,9 +2164,9 @@ def delta_str(curr, prev):
         return "N/A"
     diff = curr - prev
     if diff > 0:
-        return f"+{diff:,.0f}"
+        return f"{diff:,.0f}"  # positive: no + sign
     elif diff < 0:
-        return f"{diff:,.0f}"
+        return f"{diff:,.0f}"  # negative: - sign preserved
     return "0"
 
 
@@ -2095,7 +2179,7 @@ def delta_roi(curr, prev):
         return "N/A"
     diff = curr - prev
     if diff > 0:
-        return f"+{diff:.1f}"
+        return f"{diff:.1f}"  # positive: no + sign
     elif diff < 0:
         return f"{diff:.1f}"
     return "0"
@@ -2134,7 +2218,7 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
         resolve_date = datetime.now()
         use_last_row = False
 
-    excel_file = find_monthly_file(resolve_date, ["线上办公数据汇"])
+    excel_file = find_monthly_file(resolve_date, ["线上办公数据汇"], exclude_kw=["劫持"])
     hj_office_file = find_monthly_file(resolve_date, ["劫持", "办公数据汇总"], exclude_kw=["人事"])
     hj_hr_file = find_monthly_file(resolve_date, ["劫持", "人事数据汇总"])
 
@@ -2163,6 +2247,8 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
     price_summary_text = read_price_summary(wb)
     if daily_summary:
         for name, d in daily_summary.items():
+            if name not in ALL_PLATFORMS:
+                continue
             d["office"] = headcount.get(name, {}).get("office", 0)
             d["online"] = headcount.get(name, {}).get("online", 0)
             today[name] = d
@@ -2432,6 +2518,23 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
             content += f"\n环比昨日 简历 {hj_hr_prev['resumes']}→{hj_hr['resumes']} | 面试 {hj_hr_prev['interviews']}→{hj_hr['interviews']}\n"
         if hj_hr_monthly:
             content += f"\n当月累计 简历{hj_hr_monthly['resumes']} 面试{hj_hr_monthly['interviews']} 通过{hj_hr_monthly['passed']} 上岗{hj_hr_monthly['officially_started']}\n"
+
+    # ========== PRE-PUSH GUARD ==========
+    guard_warnings = []
+    push_ok, guard_warnings, block_reason = _plat.pre_push_guard(DATA_FOLDER)
+    if not push_ok:
+        print(f"[{timestamp}] ⛔ PUSH BLOCKED: {block_reason}")
+        send_telegram(f"⛔ <b>推送已阻止</b>\n{block_reason}")
+        return
+    if guard_warnings:
+        for w in guard_warnings:
+            print(f"[{timestamp}] ⚠️ Pre-push warning: {w}")
+
+    # ── Append pre-push guard warnings if any ──
+    if guard_warnings:
+        content += "\n## ⚠️ 推送前检查警告\n"
+        for w in guard_warnings:
+            content += f"- {w}\n"
 
     content += f"\n---\n*自动推送 | {timestamp} | 下次推送: 明日21:07*"
 

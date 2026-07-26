@@ -1,4 +1,8 @@
 {
+  "config_version": 1,
+  "updated_at": "2026-07-26",
+  "admin_telegram_ids": [],
+  "active_excel_file": "26年7月 线上办公数据汇总 New.xlsx",
   "titles": {
     "daily": "线上办公数据汇总",
     "monthly": "当月累计汇总",
@@ -19,6 +23,22 @@
     "price_summary": true
   },
   "inactive_platforms": ["PH09-2", "PH05", "PH16", "BD02"],
+  "development_platforms": ["PH09", "PH25", "PH18", "PH30", "PH35"],
+  "hijack_platforms": ["PH33"],
+  "disabled_platforms": ["PH09-2", "PH05", "PH16", "BD02"],
+  "platform_rows": {
+    "PH09":   { "daily_row": 5,  "monthly_row": 4  },
+    "PH09-2": { "daily_row": 6,  "monthly_row": 5  },
+    "PH25":   { "daily_row": 7,  "monthly_row": 6  },
+    "PH18":   { "daily_row": 8,  "monthly_row": 7  },
+    "PH30":   { "daily_row": 9,  "monthly_row": 10 },
+    "PH05":   { "daily_row": 10, "monthly_row": 11 },
+    "PH16":   { "daily_row": 11, "monthly_row": 13 },
+    "PH35":   { "daily_row": 12, "monthly_row": 14 },
+    "BD02":   { "daily_row": 17, "monthly_row": 20 },
+    "BD05":   { "daily_row": 18, "monthly_row": 23 },
+    "MM01":   { "daily_row": 23, "monthly_row": 29 }
+  },
   "bots": {
     "push": {
       "username": "@WFHDPbot",

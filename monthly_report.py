@@ -2,9 +2,12 @@ import openpyxl
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 
+# ── Unified platform config (now includes PH30+MM01 which were previously missing) ──
+import _platform_config as _plat
+
 MARCH_FILE = r'C:\Users\ak481\OneDrive\Desktop\新建文件夹\26年03月01-31 线上办公数据汇总.xlsx'
 APRIL_FILE = r'C:\Users\ak481\OneDrive\Desktop\新建文件夹\26年04月 线上办公数据汇.xlsx'
-PLATFORMS = ['PH09', 'PH09-2', 'PH25', 'PH18', 'PH05', 'PH16', 'BD02', 'BD05']
+PLATFORMS = _plat.get_development_platforms()
 
 def get_monthly(filepath, target_month):
     wb = openpyxl.load_workbook(filepath, data_only=True)

@@ -2,12 +2,15 @@ import os
 from datetime import datetime
 import openpyxl
 
+# ── Unified platform config ──
+import _platform_config as _plat
+
+PH_PLATFORMS = _plat.get_platforms_by_region("PH")
+BD_PLATFORMS = _plat.get_platforms_by_region("BD")
+MM_PLATFORMS = _plat.get_platforms_by_region("MM")
+
 TARGET_DIR = r"C:\Users\ak481\OneDrive\Desktop\ak 线上办公部门skills建议和调用"
 EXCEL_FILE = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹\26年05月 线上办公数据汇总.xlsx"
-
-PH_PLATFORMS = ["PH09", "PH09-2", "PH25", "PH18", "PH30", "PH05", "PH16"]
-BD_PLATFORMS = ["BD02", "BD05"]
-MM_PLATFORMS = ["MM01"]
 
 TIPS = [
     "Check zero-order sites today, contact immediately for reasons",

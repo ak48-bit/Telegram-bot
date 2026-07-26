@@ -1,9 +1,11 @@
 import json, urllib.request, urllib.error, time, subprocess, sys, re, io, os, shutil, tempfile
 from datetime import datetime
 
-# Fix encoding for Windows console
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+# Fix encoding for Windows console (skip in headless/pythonw mode)
+if sys.stdout and sys.stdout.buffer:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr and sys.stderr.buffer:
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 TOKEN = "8731392429:AAFb6QywB4NG4TDTmeOtzDbS7IR_G95JzAI"
 CHAT_ID = -1003899337250
@@ -11,8 +13,26 @@ API = f"https://api.telegram.org/bot{TOKEN}"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PUSH_SCRIPT = os.path.join(SCRIPT_DIR, "push_update.py")
+PUSH_EN_SCRIPT = os.path.join(SCRIPT_DIR, "push_update_en.py")
 LOG_FILE = os.path.join(SCRIPT_DIR, "bot_log.txt")
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "bot_listener_lock.txt")
+HEARTBEAT_FILE = os.path.join(tempfile.gettempdir(), "bot_heartbeat.txt")
+LAST_PUSH_DATE_FILE = os.path.join(SCRIPT_DIR, "_last_auto_push.txt")
+LAST_WEEKLY_DATE_FILE = os.path.join(SCRIPT_DIR, "_last_weekly_push.txt")
+LAST_MONTHLY_DATE_FILE = os.path.join(SCRIPT_DIR, "_last_monthly_push.txt")
+sys.path.insert(0, SCRIPT_DIR)
+try:
+    import _bot_data
+except ImportError as e:
+    _bot_data = None
+    print(f"Warning: _bot_data not available: {e}")
+
+# ── Platform config ──
+try:
+    import _platform_config as _plat_cfg
+except ImportError as e:
+    _plat_cfg = None
+    print(f"Warning: _platform_config not available: {e}")
 
 
 def acquire_lock():
@@ -49,6 +69,171 @@ def log(msg):
     with open(LOG_FILE, "a", encoding="utf-8") as lf:
         lf.write(f"[{datetime.now()}] {msg}\n")
     print(f"[{datetime.now()}] {msg}")
+
+
+def write_heartbeat():
+    try:
+        with open(HEARTBEAT_FILE, "w") as f:
+            f.write(datetime.now().isoformat())
+    except Exception:
+        pass
+
+
+def check_scheduled_push():
+    """Check if it's time for the daily/weekly/monthly scheduled push. Returns True if any push was done."""
+    try:
+        cfg = load_config()
+        push_time = cfg.get("schedule", {}).get("daily_push_time", "21:07")
+        now = datetime.now()
+        current_time = now.strftime("%H:%M")
+        today = now.strftime("%Y-%m-%d")
+
+        pushed = False
+
+        # ── Daily push at configured time ──
+        if current_time == push_time:
+            if not os.path.exists(LAST_PUSH_DATE_FILE):
+                os.makedirs(os.path.dirname(LAST_PUSH_DATE_FILE), exist_ok=True)
+            with open(LAST_PUSH_DATE_FILE, "a+") as f:
+                f.seek(0)
+                last_date = f.read().strip()
+            if last_date != today:
+                with open(LAST_PUSH_DATE_FILE, "w") as f:
+                    f.write(today)
+                log(f"Scheduled daily push triggered at {current_time}")
+                output = run_push()
+                log(f"Scheduled push done: {output[:200]}")
+                pushed = True
+                _post_push_actions()
+
+        # ── Weekly report: Monday 09:07 ──
+        if now.weekday() == 0 and current_time == "09:07":
+            if not os.path.exists(LAST_WEEKLY_DATE_FILE):
+                os.makedirs(os.path.dirname(LAST_WEEKLY_DATE_FILE), exist_ok=True)
+            with open(LAST_WEEKLY_DATE_FILE, "a+") as f:
+                f.seek(0)
+                last_weekly = f.read().strip()
+            if last_weekly != today:
+                with open(LAST_WEEKLY_DATE_FILE, "w") as f:
+                    f.write(today)
+                log(f"Weekly report triggered")
+                send_message("📊 本周一自动周报，正在生成上周数据...")
+                output = run_push(date=(now.replace(day=now.day-7)).strftime("%Y-%m-%d"))
+                log(f"Weekly push done: {output[:200]}")
+                pushed = True
+
+        # ── Monthly report: 1st of month at 09:13 ──
+        if now.day == 1 and current_time == "09:13":
+            if not os.path.exists(LAST_MONTHLY_DATE_FILE):
+                os.makedirs(os.path.dirname(LAST_MONTHLY_DATE_FILE), exist_ok=True)
+            with open(LAST_MONTHLY_DATE_FILE, "a+") as f:
+                f.seek(0)
+                last_monthly = f.read().strip()
+            if last_monthly != today:
+                with open(LAST_MONTHLY_DATE_FILE, "w") as f:
+                    f.write(today)
+                log(f"Monthly report triggered")
+                send_message("📆 本月首日自动月报，正在生成上月汇总...")
+                prev_month = f"{now.year}-{now.month-1:02d}" if now.month > 1 else f"{now.year-1}-12"
+                output = run_push(month=prev_month)
+                log(f"Monthly push done: {output[:200]}")
+                pushed = True
+
+        return pushed
+    except Exception as e:
+        log(f"Scheduled push error: {e}")
+        return False
+
+
+def _post_push_actions():
+    """Actions to run after any push: anomaly alerts + pin summary."""
+    try:
+        _send_anomaly_alerts()
+    except Exception as e:
+        log(f"Anomaly alert error: {e}")
+    try:
+        _pin_push_summary()
+    except Exception as e:
+        log(f"Pin summary error: {e}")
+
+
+def _send_anomaly_alerts():
+    """After push, check data for anomalies and send alerts."""
+    if _bot_data is None:
+        return
+    data = _bot_data.get_today_data()
+    if not data:
+        return
+    alerts = _bot_data.get_anomaly_alerts(data)
+    if alerts:
+        msg = "⚠️ <b>异常告警</b>\n" + "\n".join(alerts)
+        send_message(msg)
+    else:
+        log("Anomaly check: all sites OK")
+
+
+def _pin_push_summary():
+    """Pin a short summary message after push."""
+    if _bot_data is None:
+        return
+    data = _bot_data.get_today_data()
+    if not data:
+        return
+    summary = _bot_data.get_push_summary_text(data)
+    result = send_message(summary)
+    # Try to pin the message if it was sent successfully
+    if result.get("ok") and result.get("result"):
+        msg_id = result["result"]["message_id"]
+        api_call("pinChatMessage", {"chat_id": CHAT_ID, "message_id": msg_id, "disable_notification": True})
+
+
+PUSH_HIJACK_SCRIPT = os.path.join(SCRIPT_DIR, "push_hijack.py")
+
+
+def run_en_push():
+    """Run the English version push script."""
+    try:
+        cmd = [sys.executable, PUSH_EN_SCRIPT]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120,
+            cwd=SCRIPT_DIR
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        return f"EN push failed: {e}"
+
+
+def run_hijack_push(mode="data"):
+    """Run the hijack push script.
+    mode: "data"=推送2, "hijack"=推送3, "hr"=推送4, "all_hijack"=2+3+4"""
+    try:
+        cmd = [sys.executable, PUSH_HIJACK_SCRIPT]
+        if mode == "hijack":
+            cmd.append("hijack")
+        elif mode == "hr":
+            cmd.append("hr")
+        elif mode == "all_hijack":
+            # Run all three sequentially
+            results = []
+            for m, label in [("data", "推送2-数据"), ("hijack", "推送3-劫持办公"), ("hr", "推送4-劫持人事")]:
+                import time as _t
+                r = subprocess.run(
+                    [sys.executable, PUSH_HIJACK_SCRIPT] + (["hijack"] if m == "hijack" else (["hr"] if m == "hr" else [])),
+                    capture_output=True, text=True, timeout=300,
+                    cwd=SCRIPT_DIR
+                )
+                results.append(f"[{label}] {r.stdout.strip()[:200]}")
+                if m != "hr":
+                    _t.sleep(2)  # avoid rate limit
+            return "\n".join(results)
+        # "data" mode: no extra arg
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=300,
+            cwd=SCRIPT_DIR
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        return f"Hijack push ({mode}) failed: {e}"
 
 
 def api_call(method, payload):
@@ -108,6 +293,7 @@ def run_push(date=None, month=None, sections=None):
 
 
 DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+BACKUP_DIR = os.path.join(DATA_FOLDER, "备份")
 
 
 def download_telegram_file(file_id, save_path):
@@ -156,6 +342,25 @@ def handle_document(msg):
     is_overwrite = os.path.exists(save_path)
 
     if is_overwrite:
+        # Backup old file before overwriting
+        try:
+            os.makedirs(BACKUP_DIR, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_name = f"{ts}_{file_name}"
+            # Clean up old backups (>7 days)
+            for old_backup in sorted(os.listdir(BACKUP_DIR)):
+                if old_backup.endswith('.xlsx'):
+                    try:
+                        old_date = old_backup[:8]  # YYYYMMDD
+                        if len(old_date) == 8 and (datetime.now() - datetime.strptime(old_date, "%Y%m%d")).days > 7:
+                            os.remove(os.path.join(BACKUP_DIR, old_backup))
+                            log(f"Cleaned old backup: {old_backup}")
+                    except Exception:
+                        pass
+            shutil.copy2(save_path, os.path.join(BACKUP_DIR, backup_name))
+            log(f"Backed up to: {backup_name}")
+        except Exception as e:
+            log(f"Backup error: {e}")
         send_message(f"⚠️ 文件 {file_name} 已存在，正在覆盖...")
 
     send_message(f"📥 正在接收 {user} 上传的 {file_name} ...")
@@ -170,17 +375,20 @@ def handle_document(msg):
     log(f"Saved: {save_path}")
     overwrite_note = " (已覆盖旧文件)" if is_overwrite else ""
 
-    # Offer quick push
-    keyboard = {
-        "inline_keyboard": [
-            [{"text": "📊 立即推送最新数据", "callback_data": "push_all"}],
-            [{"text": "📋 查看菜单", "callback_data": "menu"}],
-        ]
-    }
+    # Auto-detect: if this is a main data file, auto-trigger push
+    # Normalize brackets/spacing for matching
+    _fn = file_name.replace("（", " ").replace("）", " ").replace("(", " ").replace(")", " ")
+    auto_push = any(kw in _fn for kw in ['线上办公数据汇总', '线上人事数据汇总'])
+
     send_message(f"✅ 已接收并保存: {file_name}{overwrite_note}\n"
                  f"文件大小: {size_mb:.1f} MB\n"
-                 f"存放位置: 新建文件夹\\{file_name}",
-                 reply_markup=keyboard)
+                 f"存放位置: 新建文件夹\\{file_name}")
+
+    if auto_push:
+        log(f"Auto-push triggered after upload: {file_name}")
+        send_message(f"⚡ 检测到数据文件更新，自动推送中...")
+        output = run_push()
+        log(f"Auto-push done: {output[:200]}")
 
 
 def parse_date(text):
@@ -229,6 +437,27 @@ def parse_month_only(text):
         month = m.group(1).zfill(2)
         return f"{year}-{month}"
 
+    return None
+
+
+def parse_query(text):
+    """Extract query intent: ('month', 'YYYY-MM') or ('date', 'YYYY-MM-DD') or None."""
+    # "查4月", "查询5月", "查看3月数据"
+    m = re.search(r'(?:查|查询|查看)\s*(\d{1,2})\s*月', text)
+    if m:
+        now = datetime.now()
+        month = m.group(1).zfill(2)
+        return ('month', f"{now.year}-{month}")
+    # "/query 4" or "/query 5"
+    m = re.search(r'/query\s+(\d{1,2})', text)
+    if m:
+        now = datetime.now()
+        month = m.group(1).zfill(2)
+        return ('month', f"{now.year}-{month}")
+    # "查5月6日", "查看5.6"
+    parsed_date = parse_date(text)
+    if parsed_date and ('查' in text or '查询' in text or '查看' in text):
+        return ('date', parsed_date)
     return None
 
 
@@ -316,11 +545,12 @@ def handle_toggle(args_text):
 def show_menu():
     keyboard = {
         "inline_keyboard": [
-            [{"text": "📊 推送全部数据", "callback_data": "push_all"}],
-            [{"text": "📅 线上办公数据汇总", "callback_data": "daily"}],
-            [{"text": "📆 当月累计汇总", "callback_data": "monthly"}],
-            [{"text": "🛡️ 劫持汇总+人事", "callback_data": "hijack"}],
-            [{"text": "⚙️ 配置管理", "callback_data": "cfg_menu"}, {"text": "📋 指令说明", "callback_data": "help"}],
+            [{"text": "🚀 推送全部(1+2+3+4)", "callback_data": "push_all"}],
+            [{"text": "1️⃣ 文本推送", "callback_data": "daily"}, {"text": "2️⃣ 数据截图", "callback_data": "push2"}],
+            [{"text": "3️⃣ 劫持办公", "callback_data": "push3"}, {"text": "4️⃣ 劫持人事", "callback_data": "push4"}],
+            [{"text": "📆 当月累计汇总", "callback_data": "monthly"}, {"text": "🏆 站点排名", "callback_data": "ranking"}],
+            [{"text": "🇬🇧 English Push", "callback_data": "en"}, {"text": "⚙️ 配置管理", "callback_data": "cfg_menu"}],
+            [{"text": "📋 指令说明", "callback_data": "help"}],
         ]
     }
     send_message("📋 **数据推送菜单**\n选择一个操作：", reply_markup=keyboard)
@@ -373,9 +603,27 @@ def main():
         return
     try:
         log("Bot listener started")
+
+        # ── Startup self-check ──
+        if _plat_cfg is not None:
+            log("Running platform config startup check...")
+            try:
+                startup_warnings = _plat_cfg.startup_check(DATA_FOLDER)
+                for w in startup_warnings:
+                    log(w)
+            except Exception as e:
+                log(f"Startup check error: {e}")
+
         offset = 0
+        last_heartbeat = 0
         while True:
             try:
+                # Write heartbeat every 60 seconds for watchdog
+                now_ts = time.time()
+                if now_ts - last_heartbeat > 60:
+                    write_heartbeat()
+                    last_heartbeat = now_ts
+
                 url = f"{API}/getUpdates?timeout=30&offset={offset}&allowed_updates=message,callback_query"
                 resp = urllib.request.urlopen(url, timeout=35)
                 data = json.loads(resp.read())
@@ -446,7 +694,13 @@ def main():
                                          "  /config — 查看配置\n"
                                          "  /set daily_push_time 21:30\n"
                                          "  /set title_daily 新标题\n"
-                                         "  /toggle daily_table — 开关模块")
+                                         "  /toggle daily_table — 开关模块\n"
+                                         "  排名 — 站点排行榜\n"
+                                         "  排名roi — 按ROI排\n"
+                                         "  /en — 英文版推送\n"
+                                         "  /hijack — 劫持推送(截图+源文件)\n"
+                                         "  /platforms — 查看平台配置状态\n"
+                                         "  查4月 — 历史数据查询")
                             continue
 
                         # ── Push actions ──
@@ -455,6 +709,7 @@ def main():
                             send_message(f"⚡ {cb_user} 触发推送全部数据...")
                             output = run_push(sections="daily_table,monthly_table,hijack_office,hijack_hr,dod_comparison,anomaly_alerts,fraud_alerts")
                             print(f"[{datetime.now()}] Push all done: {output[:200]}")
+                            _post_push_actions()
                             continue
 
                         if cb_data == "daily":
@@ -462,6 +717,7 @@ def main():
                             send_message(f"⚡ {cb_user} 触发地推数据推送...")
                             output = run_push(sections="daily_table,dod_comparison,anomaly_alerts,fraud_alerts")
                             print(f"[{datetime.now()}] Daily push done: {output[:200]}")
+                            _post_push_actions()
                             continue
 
                         if cb_data == "monthly":
@@ -476,6 +732,53 @@ def main():
                             send_message(f"⚡ {cb_user} 触发劫持数据推送...")
                             output = run_push(sections="hijack_office,hijack_hr")
                             print(f"[{datetime.now()}] Hijack push done: {output[:200]}")
+                            continue
+
+                        if cb_data == "push2":
+                            answer_callback(cb_id, "正在生成推送2-数据截图...")
+                            send_message(f"⚡ {cb_user} 触发推送2-数据截图...")
+                            output = run_hijack_push("data")
+                            print(f"[{datetime.now()}] Push2 done: {output[:200]}")
+                            continue
+
+                        if cb_data == "push3":
+                            answer_callback(cb_id, "正在生成推送3-劫持办公...")
+                            send_message(f"⚡ {cb_user} 触发推送3-劫持办公...")
+                            output = run_hijack_push("hijack")
+                            print(f"[{datetime.now()}] Push3 done: {output[:200]}")
+                            continue
+
+                        if cb_data == "push4":
+                            answer_callback(cb_id, "正在生成推送4-劫持人事...")
+                            send_message(f"⚡ {cb_user} 触发推送4-劫持人事...")
+                            output = run_hijack_push("hr")
+                            print(f"[{datetime.now()}] Push4 done: {output[:200]}")
+                            continue
+
+                        if cb_data == "ranking":
+                            answer_callback(cb_id, "正在生成排行榜...")
+                            if _bot_data is None:
+                                send_message("❌ 数据模块未加载")
+                            else:
+                                data = _bot_data.get_today_data()
+                                if not data:
+                                    send_message("❌ 未找到今日数据文件")
+                                else:
+                                    rankings = _bot_data.get_rankings(data, "ftd")
+                                    lines = ["🏆 <b>站点排行榜 — 按FTD</b>\n"]
+                                    for r in rankings:
+                                        diff_str = _bot_data.fmt_k_signed(r["diff"])
+                                        roi_str = f"{r['roi']:.1f}" if r["roi"] else "N/A"
+                                        lines.append(f"{r['icon']} {r['status_icon']} <b>{r['name']}</b>  FTD={r['ftd']}  ROI={roi_str}  DIFF={diff_str}")
+                                    lines.append(f"\n💡 试试：排名roi / 排名充提差")
+                                    send_message("\n".join(lines))
+                            continue
+
+                        if cb_data == "en":
+                            answer_callback(cb_id, "正在生成英文推送...")
+                            send_message(f"🇬🇧 {cb_user} 触发英文版推送...")
+                            output = run_en_push()
+                            print(f"[{datetime.now()}] EN push done: {output[:200]}")
                             continue
 
                         continue
@@ -493,6 +796,9 @@ def main():
                     # ── Document upload (Excel files) ──
                     if "document" in msg:
                         handle_document(msg)
+                        continue
+
+                    if not text:
                         continue
 
                     cmd = text.split()[0].lower().split("@")[0]
@@ -524,6 +830,20 @@ def main():
                         send_message(f"⚡ 正在推送 {parsed_date} 的数据...")
                         output = run_push(date=parsed_date)
                         print(f"[{datetime.now()}] Push done: {output[:200]}")
+                        continue
+
+                    # ── History query: "查4月", "/query 4", "查看3月" ──
+                    query = parse_query(text)
+                    if query:
+                        qtype, qval = query
+                        if qtype == 'month':
+                            send_message(f"🔍 正在查询 {qval} 整月数据...")
+                            output = run_push(month=qval)
+                            log(f"Query month {qval} by {user}: {output[:200]}")
+                        else:
+                            send_message(f"🔍 正在查询 {qval} 数据...")
+                            output = run_push(date=qval)
+                            log(f"Query date {qval} by {user}: {output[:200]}")
                         continue
 
                     # ── Regular commands ──
@@ -562,7 +882,7 @@ def main():
 
                     elif cmd == "/files":
                         # List available data files
-                        files = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith('.xlsx') and '副本' not in f and 'Copy' not in f])
+                        files = sorted([f for f in os.listdir(DATA_FOLDER) if f.endswith('.xlsx') and '副本' not in f and 'Copy' not in f and not f.startswith('~$')])
                         main_files = [f for f in files if '线上办公数据汇总' in f and '劫持' not in f]
                         hj_office = [f for f in files if '劫持' in f and '办公数据汇总' in f]
                         hj_hr = [f for f in files if '劫持' in f and '人事数据汇总' in f]
@@ -583,15 +903,58 @@ def main():
                             msg_lines.append("暂无数据文件，请上传 .xlsx 文件")
                         send_message("\n".join(msg_lines))
 
+                    elif cmd in ("/platforms", "/平台"):
+                        if _plat_cfg is None:
+                            send_message("❌ 平台配置模块未加载")
+                        else:
+                            status_text = _plat_cfg.format_platform_status(DATA_FOLDER)
+                            send_message(status_text)
+
+                    elif cmd in ("/reload_config", "/重新加载配置"):
+                        if _plat_cfg is None:
+                            send_message("❌ 平台配置模块未加载")
+                            continue
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
+                        if not admin_ids:
+                            send_message("❌ 尚未配置 Admin Telegram ID，已拒绝重新加载配置。\n请在 config.json 的 admin_telegram_ids 中填入 Admin ID。")
+                        elif sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作")
+                        else:
+                            ok, message, old_v, new_v = _plat_cfg.reload_config(DATA_FOLDER)
+                            send_message(message)
+
+                    elif cmd in ("/check_platform", "/检查平台"):
+                        args_text = text.split(None, 1)[1] if len(text.split(None, 1)) > 1 else ""
+                        code = args_text.strip()
+                        if not code:
+                            send_message("用法: /check_platform &lt;平台代码&gt;\n示例: /check_platform PH35")
+                        elif _plat_cfg is None:
+                            send_message("❌ 平台配置模块未加载")
+                        else:
+                            result = _plat_cfg.check_single_platform(code, DATA_FOLDER)
+                            msg_text = _plat_cfg.format_check_result(result)
+                            send_message(msg_text)
+
                     elif cmd == "/help":
                         send_message("📋 可用指令：\n\n"
                                      "📊 推送数据:\n"
-                                     "  /push — 推送今日全部\n"
+                                     "  /push — 推送1(文本)\n"
+                                     "  /push2 — 推送2(数据截图+Excel)\n"
+                                     "  /push3 — 推送3(劫持办公)\n"
+                                     "  /push4 — 推送4(劫持人事)\n"
+                                     "  /hijack — 推送2+3+4全部\n"
+                                     "  推送 — 自动推送全部\n"
                                      "  推送 5月6日 — 指定日期\n"
                                      "  整个4月 — 整月汇总\n"
+                                     "  查4月 — 查询历史\n"
                                      "  今天的数据 — 今日数据\n"
                                      "  本月的汇总 — 本月汇总\n"
-                                     "  /files — 查看已有数据文件\n\n"
+                                     "  /files — 查看已有数据文件\n"
+                                     "  排名 — 站点排行榜\n"
+                                     "  排名roi — 按ROI排\n"
+                                     "  /en — 英文版推送\n"
+                                     "  /platforms — 查看平台配置\n\n"
                                      "📤 上传文件:\n"
                                      "  直接拖 .xlsx 文件到群组\n"
                                      "  Bot 自动下载保存\n\n"
@@ -603,11 +966,80 @@ def main():
                                      "  /toggle daily_table — 开关模块")
 
                     elif cmd == "/start":
-                        send_message("已就绪。发送 /menu 打开菜单，或直接说：\n• 推送 — 推送最新数据\n• 推送 5月6日 — 推送指定日期")
+                        send_message("已就绪。发送 /menu 打开菜单，或直接说：\n• 推送 — 推送最新数据\n• 推送 5月6日 — 推送指定日期\n• 查4月 — 查询历史数据\n• 排名 — 站点排行榜\n• /en — English push\n• 上传 .xlsx 文件 — 自动推送")
+
+                    # ── Site ranking: "/rank", "排名", "排行榜", "/ranking" ──
+                    elif cmd in ("/rank", "/ranking") or (text and text.strip() in ("排名", "排行榜", "对比")):
+                        if _bot_data is None:
+                            send_message("❌ 数据模块未加载，请检查 _bot_data.py")
+                        else:
+                            data = _bot_data.get_today_data()
+                            if not data:
+                                send_message("❌ 未找到今日数据文件")
+                            else:
+                                # Determine sort key from text
+                                sort_by = "ftd"
+                                if "roi" in text.lower() or "投产" in text:
+                                    sort_by = "roi"
+                                elif "diff" in text.lower() or "充提差" in text or "存提差" in text:
+                                    sort_by = "diff"
+                                elif "注册" in text:
+                                    sort_by = "register"
+                                elif "转化" in text:
+                                    sort_by = "conversion"
+
+                                rankings = _bot_data.get_rankings(data, sort_by)
+                                label = {"ftd": "FTD", "roi": "ROI", "diff": "充提差", "register": "注册", "conversion": "转化率"}.get(sort_by, sort_by)
+                                lines = [f"🏆 <b>站点排行榜 — 按{label}</b>\n"]
+                                for r in rankings:
+                                    diff_str = _bot_data.fmt_k_signed(r["diff"])
+                                    roi_str = f"{r['roi']:.1f}" if r["roi"] else "N/A"
+                                    lines.append(f"{r['icon']} {r['status_icon']} <b>{r['name']}</b>  FTD={r['ftd']}  ROI={roi_str}  DIFF={diff_str}")
+                                lines.append(f"\n💡 试试：排名roi / 排名充提差 / 排名注册")
+                                send_message("\n".join(lines))
+
+                    # ── Push2/3/4 via text commands ──
+                    elif cmd in ("/push2", "/数据截图") or text.strip() == "推送2":
+                        log(f"Push2 from {user}")
+                        send_message("⚡ 正在生成推送2-数据截图...")
+                        output = run_hijack_push("data")
+                        log(f"Push2 done: {output[:200]}")
+
+                    elif cmd in ("/push3", "/劫持办公") or text.strip() == "推送3":
+                        log(f"Push3 from {user}")
+                        send_message("⚡ 正在生成推送3-劫持办公...")
+                        output = run_hijack_push("hijack")
+                        log(f"Push3 done: {output[:200]}")
+
+                    elif cmd in ("/push4", "/劫持人事") or text.strip() == "推送4":
+                        log(f"Push4 from {user}")
+                        send_message("⚡ 正在生成推送4-劫持人事...")
+                        output = run_hijack_push("hr")
+                        log(f"Push4 done: {output[:200]}")
+
+                    # ── Hijack push: "/hijack" (old compat, now runs all hijack pushes 2+3+4) ──
+                    elif cmd == "/hijack" or text.strip() == "劫持推送":
+                        log(f"Hijack push from {user}")
+                        send_message("🛡️ 正在生成劫持推送（2+3+4）...")
+                        output = run_hijack_push("all_hijack")
+                        log(f"Hijack push done: {output[:200]}")
+
+                    # ── English push: "/en" ──
+                    elif cmd == "/en":
+                        log(f"EN push from {user}")
+                        send_message("🇬🇧 Generating English push...")
+                        output = run_en_push()
+                        log(f"EN push done: {output[:200]}")
 
             except Exception as e:
                 log(f"Poll error: {e}")
                 time.sleep(5)
+
+            # Check for scheduled daily push after each polling cycle
+            try:
+                check_scheduled_push()
+            except Exception:
+                pass
     finally:
         release_lock()
 

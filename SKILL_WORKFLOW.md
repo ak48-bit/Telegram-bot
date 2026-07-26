@@ -29,7 +29,7 @@
 
 | 配置项 | 值 |
 |--------|-----|
-| Bot Token | `8731392429:AAFb6QywB4NG4TDTmeOtzDbS7IR_G95JzAI` |
+| Bot Token | `<TELEGRAM_BOT_TOKEN>` |
 | Bot 名称 | @WFHDPbot |
 | 目标群组 | sss (chat_id: `-1003899337250`) |
 | 发送格式 | HTML parse_mode |
@@ -45,7 +45,7 @@ $body = @{
 } | ConvertTo-Json -Depth 3
 
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($body)
-Invoke-RestMethod -Uri "https://api.telegram.org/bot8731392429:AAFb6QywB4NG4TDTmeOtzDbS7IR_G95JzAI/sendMessage" `
+Invoke-RestMethod -Uri "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage" `
     -Method Post -Body $bytes -ContentType "application/json; charset=utf-8"
 ```
 

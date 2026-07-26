@@ -1,9 +1,33 @@
-# Ignore everything
+# Ignore everything by default
 *
 
-# Except source and docs
+# ── WFHDP Bot source files ──
+!bot_listener.py
+!push_update.py
+!push_update_en.py
+!push_hijack.py
+!_bot_data.py
+!_platform_config.py
+!ftd_price_push.py
+!monthly_report.py
+!config.json
+!check_env.py
+!validate_excel.py
+!sync_excel_to_do.ps1
+!install_excel_sync_task.ps1
+!bot_watchdog.ps1
+
+# ── Startup scripts ──
+!*.bat
+!*.vbs
+
+# ── Documentation ──
+!SKILL_WORKFLOW.md
+
+# ── IP Risk Bot (existing) ──
 !backend_client.py
 !webhook_app.py
+!webhook_app_EN.py
 !requirements.txt
 !Procfile
 !.gitignore
@@ -16,12 +40,3 @@
 !IP_RISK_AUDIT_BOT_COMPLETE_DEPLOYMENT.md
 !systemd/
 !systemd/ip-risk-bot.service
-
-# Explicitly excluded (sensitive / runtime data)
-# .env
-# risk_cases_*.json
-# risk_cases_latest.json
-# sent_risk_cases.json
-# direct_agents_cache.json
-# __pycache__/
-# *.pyc

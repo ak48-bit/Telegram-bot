@@ -16,7 +16,12 @@ def load_config():
             return json.load(f)
     return {}
 CONFIG = load_config()
-DATA_FOLDER = CONFIG.get("data_folder", r"C:\Users\ak481\OneDrive\Desktop\新建文件夹")
+# DATA_FOLDER: env var → config.json → hardcoded fallback
+_env_df = os.environ.get("DATA_FOLDER", "").strip()
+if _env_df:
+    DATA_FOLDER = _env_df
+else:
+    DATA_FOLDER = CONFIG.get("data_folder", r"C:\Users\ak481\OneDrive\Desktop\新建文件夹")
 
 # ── Unified platform config (single source of truth) ──
 import _platform_config as _plat
@@ -97,8 +102,10 @@ def find_monthly_file(target_date, keywords, exclude_kw=None):
             return os.path.join(DATA_FOLDER, f)
     return None
 
-TELEGRAM_BOT_TOKEN = "8731392429:AAFb6QywB4NG4TDTmeOtzDbS7IR_G95JzAI"
-TELEGRAM_CHAT_ID = "-1003899337250"
+# Telegram credentials — lazy getter, called inside send functions only
+def _get_tg():
+    """Return (token, chat_id) from environment. Raises RuntimeError if missing."""
+    return _plat.get_telegram_credentials()
 
 # Column display widths (visual)
 COLS = [
@@ -1186,9 +1193,10 @@ def esc_html(s):
 
 
 def send_telegram(text, parse_mode="HTML"):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    token, chat_id = _get_tg()
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = json.dumps({
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": chat_id,
         "text": text,
         "parse_mode": parse_mode,
         "disable_web_page_preview": True,
@@ -1347,7 +1355,8 @@ def render_table_image(title, headers, rows, col_widths=None):
 
 def send_telegram_photo(image_bytes, caption=""):
     """Send a PNG image to Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+    token, chat_id = _get_tg()
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
     import io
     buf = io.BytesIO()
     buf.write(image_bytes)
@@ -1357,7 +1366,7 @@ def send_telegram_photo(image_bytes, caption=""):
     boundary = "---boundary" + os.urandom(8).hex()
     body = []
     body.append(f"--{boundary}".encode())
-    body.append(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{TELEGRAM_CHAT_ID}'.encode())
+    body.append(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}'.encode())
     body.append(f"--{boundary}".encode())
     body.append(f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}'.encode())
     body.append(f"--{boundary}".encode())
@@ -1381,7 +1390,8 @@ def send_telegram_photo(image_bytes, caption=""):
 
 def send_telegram_document(image_bytes, caption="", filename="table.png"):
     """Send a PNG image as Document (lossless) to Telegram."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+    token, chat_id = _get_tg()
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
     import io
     buf = io.BytesIO()
     buf.write(image_bytes)
@@ -1390,7 +1400,7 @@ def send_telegram_document(image_bytes, caption="", filename="table.png"):
     boundary = "---boundary" + os.urandom(8).hex()
     body = []
     body.append(f"--{boundary}".encode())
-    body.append(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{TELEGRAM_CHAT_ID}'.encode())
+    body.append(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}'.encode())
     body.append(f"--{boundary}".encode())
     body.append(f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}'.encode())
     body.append(f"--{boundary}".encode())

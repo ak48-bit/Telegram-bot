@@ -31,6 +31,24 @@ REGION_PREFIXES = ("PH", "BD", "MM")
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  Telegram credentials (unified — call only when actually sending)
+# ══════════════════════════════════════════════════════════════════════
+
+def get_telegram_credentials():
+    """Return (token, chat_id) from environment variables.
+    Raises RuntimeError if either is missing.
+    Call only when actually starting the bot or sending a message.
+    """
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+    if not chat_id:
+        raise RuntimeError("TELEGRAM_CHAT_ID is not configured")
+    return token, int(chat_id)
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  Cache / loading
 # ══════════════════════════════════════════════════════════════════════
 
@@ -119,6 +137,11 @@ def get_platforms_by_region(region):
 
 
 def get_admin_ids():
+    """Return admin Telegram IDs. Env var ADMIN_TELEGRAM_IDS takes priority
+    (comma-separated), falls back to config.json admin_telegram_ids."""
+    env_val = os.environ.get("ADMIN_TELEGRAM_IDS", "").strip()
+    if env_val:
+        return [x.strip() for x in env_val.split(",") if x.strip()]
     _load()
     return _cfg.get("admin_telegram_ids", [])
 

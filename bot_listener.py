@@ -7,9 +7,20 @@ if sys.stdout and sys.stdout.buffer:
 if sys.stderr and sys.stderr.buffer:
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-TOKEN = "8731392429:AAFb6QywB4NG4TDTmeOtzDbS7IR_G95JzAI"
-CHAT_ID = -1003899337250
-API = f"https://api.telegram.org/bot{TOKEN}"
+# ── Telegram credentials — lazy, from _platform_config ──
+# These are set to None at import time; real values loaded on listener start.
+TOKEN = None
+CHAT_ID = 0
+API = ""
+
+def _init_telegram():
+    global TOKEN, CHAT_ID, API
+    token, chat_id = _plat_cfg.get_telegram_credentials() if _plat_cfg else (None, None)
+    if not token:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is not configured")
+    TOKEN = token
+    CHAT_ID = chat_id
+    API = f"https://api.telegram.org/bot{TOKEN}"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PUSH_SCRIPT = os.path.join(SCRIPT_DIR, "push_update.py")
@@ -205,33 +216,37 @@ def run_en_push():
 
 def run_hijack_push(mode="data"):
     """Run the hijack push script.
-    mode: "data"=推送2, "hijack"=推送3, "hr"=推送4, "all_hijack"=2+3+4"""
+    mode: "data"=推送2, "hijack"=推送3, "hr"=推送4, "all_hijack"=2+3+4
+    On Ubuntu: returns a friendly message instead of crashing."""
     try:
-        cmd = [sys.executable, PUSH_HIJACK_SCRIPT]
+        def _run_one(m, extra_args=None):
+            cmd = [sys.executable, PUSH_HIJACK_SCRIPT]
+            if extra_args:
+                cmd.extend(extra_args)
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=SCRIPT_DIR)
+            out = r.stdout.strip()
+            # Detect Windows-only rejection
+            if r.returncode != 0 and "only available on Windows" in (out + r.stderr):
+                return "此功能仅支持 Windows"
+            if r.returncode != 0:
+                return f"执行失败 (exit {r.returncode}): {out[:100]}"
+            return out[:200]
+
         if mode == "hijack":
-            cmd.append("hijack")
+            return _run_one("hijack", ["hijack"])
         elif mode == "hr":
-            cmd.append("hr")
+            return _run_one("hr", ["hr"])
         elif mode == "all_hijack":
-            # Run all three sequentially
             results = []
             for m, label in [("data", "推送2-数据"), ("hijack", "推送3-劫持办公"), ("hr", "推送4-劫持人事")]:
-                import time as _t
-                r = subprocess.run(
-                    [sys.executable, PUSH_HIJACK_SCRIPT] + (["hijack"] if m == "hijack" else (["hr"] if m == "hr" else [])),
-                    capture_output=True, text=True, timeout=300,
-                    cwd=SCRIPT_DIR
-                )
-                results.append(f"[{label}] {r.stdout.strip()[:200]}")
+                extra = ["hijack"] if m == "hijack" else (["hr"] if m == "hr" else None)
+                r = _run_one(m, extra)
+                results.append(f"[{label}] {r}")
                 if m != "hr":
-                    _t.sleep(2)  # avoid rate limit
+                    import time as _t; _t.sleep(2)
             return "\n".join(results)
-        # "data" mode: no extra arg
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=300,
-            cwd=SCRIPT_DIR
-        )
-        return result.stdout.strip()
+        else:
+            return _run_one("data")
     except Exception as e:
         return f"Hijack push ({mode}) failed: {e}"
 
@@ -292,17 +307,25 @@ def run_push(date=None, month=None, sections=None):
         return f"执行失败: {e}"
 
 
-# Read DATA_FOLDER from config.json (with fallback for backward compat)
-try:
-    import json as _json
-    _cfg_tmp = None
-    _cfg_path = os.path.join(SCRIPT_DIR, "config.json")
-    if os.path.exists(_cfg_path):
-        with open(_cfg_path, "r", encoding="utf-8") as _f:
-            _cfg_tmp = _json.load(_f)
-    DATA_FOLDER = _cfg_tmp.get("data_folder", r"C:\Users\ak481\OneDrive\Desktop\新建文件夹") if _cfg_tmp else r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
-except Exception:
-    DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+# Read DATA_FOLDER: env var → config.json → hardcoded fallback
+def _resolve_data_folder():
+    env_val = os.environ.get("DATA_FOLDER", "").strip()
+    if env_val:
+        return env_val
+    try:
+        import json as _json
+        _cfg_path = os.path.join(SCRIPT_DIR, "config.json")
+        if os.path.exists(_cfg_path):
+            with open(_cfg_path, "r", encoding="utf-8") as _f:
+                _cfg_tmp = _json.load(_f)
+            cfg_val = _cfg_tmp.get("data_folder", "").strip()
+            if cfg_val:
+                return cfg_val
+    except Exception:
+        pass
+    return r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+
+DATA_FOLDER = _resolve_data_folder()
 BACKUP_DIR = os.path.join(DATA_FOLDER, "备份")
 
 
@@ -611,6 +634,12 @@ def show_config_menu():
 def main():
     if not acquire_lock():
         return
+    try:
+        _init_telegram()
+    except RuntimeError as e:
+        log(f"FATAL: {e}")
+        release_lock()
+        sys.exit(1)
     try:
         log("Bot listener started")
 

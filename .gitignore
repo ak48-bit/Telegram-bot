@@ -41,4 +41,8 @@
 !systemd/
 !systemd/ip-risk-bot.service
 
+# ── Comparison archive (quarantine README only, not Excel snapshots) ──
+!data/comparison_archive/quarantine/
+!data/comparison_archive/quarantine/README.txt
+
 !comparison_push.py

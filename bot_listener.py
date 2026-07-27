@@ -1006,6 +1006,21 @@ def main():
                             log(f"Compare error: {e}")
                             send_message(f"❌ 数据对比推送失败: {e}")
 
+                    elif cmd in ("/compare_check", "/对比检查"):
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
+                        if not admin_ids:
+                            send_message("❌ 管理员名单未配置，此功能已禁用"); continue
+                        if sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅管理员可执行"); continue
+                        try:
+                            import comparison_push as cp
+                            status_text = cp.check_comparison_status()
+                            send_message(status_text)
+                        except Exception as e:
+                            log(f"Compare check error: {e}")
+                            send_message(f"❌ 状态检查失败: {e}")
+
                     elif cmd in ("/compare", "/数据对比"):
                         sender_id = str(msg.get("from", {}).get("id", ""))
                         admin_ids = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]

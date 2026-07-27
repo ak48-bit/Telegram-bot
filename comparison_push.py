@@ -423,6 +423,144 @@ def generate_comparison(target_date_str=None):
     return True, "", results, conclusion
 
 
+def check_comparison_status():
+    """Read-only status check. No PNG, no snapshot, no Excel modification.
+    Returns formatted text for /compare_check."""
+    lines = ["📊 数据对比状态检查", ""]
+
+    # ── Realtime files ──
+    lines.append("【实时文件】")
+    dev_path = _find_latest(DATA_FOLDER, "线上办公数据汇总", "劫持")
+    hij_path = _find_latest(DATA_FOLDER, "劫持（线上办公数据汇总）")
+
+    dev_date = _read_internal_date(dev_path) if dev_path else None
+    hij_date = _read_internal_date(hij_path) if hij_path else None
+
+    if dev_path:
+        lines.append(f"开发：{'✅' if dev_date else '❌ 无法识别日期'} {dev_date or ''}")
+        lines.append(f"路径：{dev_path}")
+    else:
+        lines.append("开发：❌ 未找到实时文件")
+    if hij_path:
+        lines.append(f"劫持：{'✅' if hij_date else '❌ 无法识别日期'} {hij_date or ''}")
+        lines.append(f"路径：{hij_path}")
+    else:
+        lines.append("劫持：❌ 未找到实时文件")
+
+    if not dev_date:
+        lines.append("")
+        lines.append("❌ 无法识别实时Excel实际数据截止日期")
+        return "\n".join(lines)
+
+    # ── Default /compare ──
+    lines.append("")
+    lines.append("【默认 /compare】")
+    try:
+        cur_dt = datetime.strptime(dev_date, '%Y-%m-%d')
+        prev_day_dt = cur_dt - timedelta(days=1)
+        prev_month_dt = (cur_dt.replace(month=cur_dt.month - 1) if cur_dt.month > 1
+                         else cur_dt.replace(year=cur_dt.year - 1, month=12))
+    except Exception:
+        lines.append("❌ 日期解析失败")
+        return "\n".join(lines)
+
+    cur_label = _date_label(dev_date)
+    prev_label = _date_label(prev_day_dt.strftime('%Y-%m-%d'))
+    month_label = _date_label(prev_month_dt.strftime('%Y-%m-%d'))
+
+    lines.append(f"当前：{dev_date} ({cur_label})")
+    lines.append(f"前一日：{prev_day_dt.strftime('%Y-%m-%d')} ({prev_label})")
+    lines.append(f"上月同日：{prev_month_dt.strftime('%Y-%m-%d')} ({month_label})")
+    lines.append("")
+
+    default_ok = True
+    missing = []
+    for label, date_str in [("当前实时", dev_date),
+                             ("前一日", prev_day_dt.strftime('%Y-%m-%d')),
+                             ("上月同日", prev_month_dt.strftime('%Y-%m-%d'))]:
+        if label == "当前实时":
+            exists = dev_path is not None
+        else:
+            p = _archive_path("development", date_str)
+            exists = os.path.isfile(p)
+        icon = "✅" if exists else "❌"
+        lines.append(f"  {icon} {label}")
+        if not exists:
+            default_ok = False
+            if label == "前一日":
+                missing.append(f"development_{prev_day_dt.strftime('%Y-%m-%d')}.xlsx")
+            elif label == "上月同日":
+                missing.append(f"development_{prev_month_dt.strftime('%Y-%m-%d')}.xlsx")
+
+    if default_ok:
+        lines.append("")
+        lines.append("状态：✅ 默认 /compare 可以执行")
+    else:
+        lines.append("")
+        lines.append("状态：❌ 默认 /compare 无法执行")
+        if missing:
+            lines.append(f"缺少：{', '.join(missing)}")
+
+    # ── /compare_date 2026-07-25 ──
+    lines.append("")
+    lines.append("【/compare_date 2026-07-25】")
+    spec_ok = True
+    for label, date_str in [("当前", "2026-07-25"),
+                             ("前一日", "2026-07-24"),
+                             ("上月同日", "2026-06-25")]:
+        p = _archive_path("development", date_str)
+        exists = os.path.isfile(p)
+        icon = "✅" if exists else "❌"
+        lines.append(f"  {icon} {label} ({date_str})")
+        if not exists:
+            spec_ok = False
+    lines.append("")
+    lines.append(f"状态：{'✅ 可以执行' if spec_ok else '❌ 无法执行'}")
+
+    # ── Archive summary ──
+    lines.append("")
+    lines.append("【Archive】")
+    dev_archives = sorted([f for f in os.listdir(ARCHIVE_DIR)
+                           if f.startswith("development_") and f.endswith(".xlsx")])
+    hij_archives = sorted([f for f in os.listdir(ARCHIVE_DIR)
+                           if f.startswith("hijack_") and f.endswith(".xlsx")])
+    lines.append(f"Development：{len(dev_archives)} 份")
+    lines.append(f"Hijack：{len(hij_archives)} 份")
+
+    # Count quarantined snapshots
+    quar_dir = os.path.join(ARCHIVE_DIR, "quarantine")
+    quar_count = 0
+    if os.path.isdir(quar_dir):
+        quar_count = len([f for f in os.listdir(quar_dir) if f.endswith('.xlsx')])
+    lines.append(f"隔离异常快照：{quar_count} 份")
+
+    if dev_archives:
+        first = dev_archives[0].replace("development_", "").replace(".xlsx", "")
+        last = dev_archives[-1].replace("development_", "").replace(".xlsx", "")
+        lines.append(f"最早：{first}")
+        lines.append(f"最新：{last}")
+
+    # Warn about snapshots newer than realtime date
+    if dev_date and dev_archives:
+        try:
+            rt = datetime.strptime(dev_date, '%Y-%m-%d')
+            newer = []
+            for a in dev_archives:
+                d_str = a.replace("development_", "").replace(".xlsx", "")
+                try:
+                    ad = datetime.strptime(d_str, '%Y-%m-%d')
+                    if ad > rt: newer.append(a)
+                except: pass
+            if newer:
+                lines.append("")
+                lines.append("⚠️ Archive存在晚于实时日期的快照：")
+                for n in newer: lines.append(f"  {n}")
+                lines.append("请检查是否为旧日期识别逻辑产生的错误命名文件。")
+        except: pass
+
+    return "\n".join(lines)
+
+
 def send_comparison(send_photo_fn, send_message_fn, target_date=None):
     ok, error, images, conclusion = generate_comparison(target_date)
     if not ok:

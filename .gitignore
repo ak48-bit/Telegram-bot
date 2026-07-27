@@ -40,3 +40,5 @@
 !IP_RISK_AUDIT_BOT_COMPLETE_DEPLOYMENT.md
 !systemd/
 !systemd/ip-risk-bot.service
+
+!comparison_push.py

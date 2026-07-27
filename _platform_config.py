@@ -34,11 +34,38 @@ REGION_PREFIXES = ("PH", "BD", "MM")
 #  Telegram credentials (unified — call only when actually sending)
 # ══════════════════════════════════════════════════════════════════════
 
+def _load_wfhdp_env():
+    """Load .wfhdp.env from script directory into os.environ (if file exists).
+    Does NOT override existing env vars. Simple KEY=VALUE parser.
+    Returns list of warnings (empty if all OK)."""
+    warnings = []
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".wfhdp.env")
+    if not os.path.isfile(env_path):
+        return warnings
+    try:
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except PermissionError:
+        warnings.append(f"Cannot read .wfhdp.env: permission denied")
+    except Exception as e:
+        warnings.append(f"Cannot read .wfhdp.env: {e}")
+    return warnings
+
+
 def get_telegram_credentials():
-    """Return (token, chat_id) from environment variables.
-    Raises RuntimeError if either is missing.
-    Call only when actually starting the bot or sending a message.
+    """Return (token, chat_id) from env or .wfhdp.env.
+    Priority: OS environment > .wfhdp.env file.
+    Raises RuntimeError if missing.
     """
+    _load_wfhdp_env()
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
     if not token:

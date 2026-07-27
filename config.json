@@ -4,6 +4,15 @@
   "admin_telegram_ids": [],
   "active_excel_file": "26年7月 线上办公数据汇总 New.xlsx",
   "data_folder": "C:\\Users\\ak481\\OneDrive\\Desktop\\新建文件夹",
+  "comparison": {
+    "current_file": "26年7月 线上办公数据汇总 New.xlsx",
+    "current_label": "7月25日",
+    "previous_day_file": "C:\\Users\\ak481\\OneDrive\\Desktop\\ak 线上办公部门skills建议和调用\\data\\comparison_archive\\development_2026-07-24.xlsx",
+    "previous_day_label": "7月24日",
+    "previous_month_file": "C:\\Users\\ak481\\Downloads\\Telegram Desktop\\26年6月 线上办公数据汇总 (5).xlsx",
+    "previous_month_label": "6月25日",
+    "previous_day_cutoff_note": true
+  },
   "titles": {
     "daily": "线上办公数据汇总",
     "monthly": "当月累计汇总",

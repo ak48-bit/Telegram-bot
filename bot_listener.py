@@ -975,6 +975,73 @@ def main():
                             msg_text = _plat_cfg.format_check_result(result)
                             send_message(msg_text)
 
+                    elif cmd in ("/compare_date", "/指定对比"):
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
+                        if not admin_ids:
+                            send_message("❌ 管理员名单未配置，数据对比功能已禁用"); continue
+                        if sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅管理员可执行数据对比推送"); continue
+                        args_text = text.split(None, 1)[1] if len(text.split(None, 1)) > 1 else ""
+                        date_arg = args_text.strip()
+                        if not date_arg:
+                            send_message("用法: /compare_date YYYY-MM-DD\n示例: /compare_date 2026-07-25"); continue
+                        try:
+                            import comparison_push as cp
+                            def _send_photo(img_bytes, caption):
+                                boundary = "---boundary" + os.urandom(8).hex()
+                                buf = io.BytesIO(); buf.write(img_bytes); buf.seek(0)
+                                body = [f"--{boundary}".encode(),
+                                        f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{CHAT_ID}'.encode()]
+                                if caption: body.append(f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}'.encode('utf-8'))
+                                body.append(f"--{boundary}".encode())
+                                body.append(f'Content-Disposition: form-data; name="photo"; filename="compare.png"\r\nContent-Type: image/png\r\n'.encode())
+                                body.append(buf.read()); body.append(f"--{boundary}--".encode())
+                                data = b"\r\n".join(body)
+                                req = urllib.request.Request(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", data=data)
+                                for k, v in {"Content-Type": f"multipart/form-data; boundary={boundary}"}.items(): req.add_header(k, v)
+                                urllib.request.urlopen(req, timeout=30)
+                            cp.send_comparison(_send_photo, send_message, target_date=date_arg)
+                        except Exception as e:
+                            log(f"Compare error: {e}")
+                            send_message(f"❌ 数据对比推送失败: {e}")
+
+                    elif cmd in ("/compare", "/数据对比"):
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
+                        if not admin_ids:
+                            send_message("❌ 管理员名单未配置，数据对比功能已禁用")
+                            continue
+                        if sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅管理员可执行数据对比推送")
+                            continue
+                        try:
+                            import comparison_push as cp
+                            def _send_photo(img_bytes, caption):
+                                boundary = "---boundary" + os.urandom(8).hex()
+                                buf = io.BytesIO()
+                                buf.write(img_bytes)
+                                buf.seek(0)
+                                body = []
+                                body.append(f"--{boundary}".encode())
+                                body.append(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{CHAT_ID}'.encode())
+                                body.append(f"--{boundary}".encode())
+                                if caption:
+                                    body.append(f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption}'.encode('utf-8'))
+                                body.append(f"--{boundary}".encode())
+                                body.append(f'Content-Disposition: form-data; name="photo"; filename="compare.png"\r\nContent-Type: image/png\r\n'.encode())
+                                body.append(buf.read())
+                                body.append(f"--{boundary}--".encode())
+                                data = b"\r\n".join(body)
+                                req = urllib.request.Request(f"https://api.telegram.org/bot{TOKEN}/sendPhoto", data=data)
+                                for k, v in {"Content-Type": f"multipart/form-data; boundary={boundary}"}.items():
+                                    req.add_header(k, v)
+                                urllib.request.urlopen(req, timeout=30)
+                            cp.send_comparison(_send_photo, send_message)
+                        except Exception as e:
+                            log(f"Compare error: {e}")
+                            send_message(f"❌ 数据对比推送失败: {e}")
+
                     elif cmd == "/help":
                         send_message("📋 可用指令：\n\n"
                                      "📊 推送数据:\n"

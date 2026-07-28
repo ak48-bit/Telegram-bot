@@ -286,6 +286,8 @@ def run_en_push():
 def run_hijack_push(mode="data", dry_run=False, target_date=None):
     """Run the hijack push script. Returns unified dict with steps.
     dry_run=True: generates images via --dry-run flag, no Telegram API calls."""
+    if not dry_run and not TOKEN:
+        _init_telegram()
     try:
         def _run_summary_only():
             """Run push_hijack.py hijack --summary-only --output-json. Returns parsed JSON dict."""
@@ -319,7 +321,7 @@ def run_hijack_push(mode="data", dry_run=False, target_date=None):
             base_result["steps"].append(step)
 
         if mode == "hijack":
-            # Step 1: summary-only (generates screenshot, no xlsx)
+            # ── Phase 1: Generate ALL assets first ──
             sum_result = _run_summary_only()
             if not sum_result.get("success"):
                 base_result["success"] = False
@@ -331,28 +333,50 @@ def run_hijack_push(mode="data", dry_run=False, target_date=None):
             ss_size = sd.get("size", 0) if sd.get("size") else 0
             xlsx_path = sum_result.get("xlsx", {}).get("path", "")
 
-            if not dry_run and ss_path and os.path.isfile(ss_path):
+            comp = _send_hijack_comparison(target_date=target_date, dry_run=True)  # Always generate, never send here
+            comp_ok = comp.get("success", False)
+
+            # Verify all assets exist before any send
+            missing = []
+            if not ss_path or not os.path.isfile(ss_path): missing.append("summary")
+            if comp_ok:
+                for cs in comp.get("steps", []):
+                    cp = cs.get("path", "")
+                    if cp and not os.path.isfile(cp): missing.append(cs.get("type", "comparison"))
+            else:
+                missing.append("comparison")
+            if not xlsx_path or not os.path.isfile(xlsx_path): missing.append("xlsx")
+
+            if missing and not dry_run:
+                base_result["success"] = False
+                base_result["error"] = f"Preflight failed — missing: {', '.join(missing)}"
+                log(f"PH33 push preflight failed: {missing}")
+                return base_result
+
+            # ── Phase 2: All assets ready, send in order ──
+            if not dry_run:
                 _send_photo_file(ss_path)
 
             _add_step(1, "hijack_summary", path=ss_path, size=ss_size,
                       source_file=sd.get("source_file"), sent=not dry_run)
 
-            # Step 2: comparison combined image
-            comp = _send_hijack_comparison(target_date=target_date, dry_run=dry_run)
-            if comp.get("success"):
-                for s in comp.get("steps", []):
-                    s["order"] = len(base_result["steps"]) + 1
-                    base_result["steps"].append(s)
+            if comp_ok:
+                for cs in comp.get("steps", []):
+                    cp = cs.get("path", "")
+                    if not dry_run and cp and os.path.isfile(cp):
+                        _send_photo_file(cp)
+                    cs["order"] = len(base_result["steps"]) + 1
+                    cs["sent"] = not dry_run
+                    base_result["steps"].append(cs)
             else:
                 base_result["success"] = False
-                base_result["error"] = comp.get("error", "unknown")
+                base_result["error"] = comp.get("error", "comparison generation failed")
 
-            # Step 3: xlsx file (last)
             if not dry_run and xlsx_path and os.path.isfile(xlsx_path):
                 from push_hijack import send_document as _hj_send_doc
                 _hj_send_doc(xlsx_path)
-            _add_step(3, "xlsx", path=xlsx_path, sent=not dry_run,
-                      skipped_in_dry_run=dry_run)
+            _add_step(len(base_result["steps"]) + 1, "xlsx", path=xlsx_path,
+                      sent=not dry_run, skipped_in_dry_run=dry_run)
             return base_result
 
         elif mode == "hr":

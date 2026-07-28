@@ -130,6 +130,128 @@ def _find_latest_day_in_month(wb, year, month):
     return latest_day if latest_day > 0 else None
 
 
+# ── Platform sheet column mapping (same for June and July templates) ──
+# Daily row fields to sum cumulatively:
+_DAILY_COLS = {
+    "注册": 7, "FTD": 8, "首存金额": 20,
+    "充值人数": 11, "复存人数": 12,
+    "存款": 23, "提款": 24,
+}
+# 汇总 sheet headcount columns (per-platform rows)
+_HC_COLS = {"现场人数": 4, "转线上人数": 5, "线上人数": 6}
+
+
+def _read_as_of_date(filepath, target_date, dev_platforms):
+    """Sum platform sheet daily rows up to target_date for each dev platform.
+    Returns (data_dict, metadata_dict).
+    HC fields are only valid when the file is an exact-date snapshot."""
+    import re
+    if not os.path.isfile(filepath):
+        raise FileNotFoundError(f"文件不存在: {os.path.basename(filepath)}")
+
+    # ── Determine source type ──
+    file_cutoff_date = _read_internal_date(filepath)
+    is_exact_snapshot = (file_cutoff_date is not None and file_cutoff_date == target_date)
+    source_type = "exact_snapshot" if is_exact_snapshot else "full_month_as_of"
+    warning = None if is_exact_snapshot else (
+        f"⚠️ {_date_label(target_date)}缺少独立历史快照，"
+        f"人数及人均开发无法从全月文件准确回溯。")
+
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+
+    # ── Read headcount from 汇总 sheet ──
+    ws_summary = wb[wb.sheetnames[0]]
+    row4_col3 = str(ws_summary.cell(row=4, column=3).value or "").strip()
+    is_june_template = (row4_col3 == "1" or row4_col3 == "" or row4_col3.isdigit())
+
+    if is_june_template:
+        PLAT_COL, ONSITE_COL, TRANSFER_COL, ONLINE_COL = 2, 3, 4, 5
+    else:
+        PLAT_COL, ONSITE_COL, TRANSFER_COL, ONLINE_COL = 3, 4, 5, 6
+
+    hc = {}
+    for r in range(4, ws_summary.max_row + 1):
+        platform = str(ws_summary.cell(row=r, column=PLAT_COL).value or "").strip()
+        if platform in dev_platforms and platform not in hc:
+            onsite = ws_summary.cell(row=r, column=ONSITE_COL).value
+            transfer = ws_summary.cell(row=r, column=TRANSFER_COL).value
+            online = ws_summary.cell(row=r, column=ONLINE_COL).value
+            try: onsite = int(float(onsite)) if onsite else 0
+            except: onsite = 0
+            try: transfer = int(float(transfer)) if transfer else 0
+            except: transfer = 0
+            try: online = int(float(online)) if online else 0
+            except: online = 0
+            hc[platform] = {"现场": onsite, "转线上": transfer, "线上": online}
+
+    # ── Sum daily data from each platform sheet ──
+    totals = {k: 0.0 for k in _DAILY_COLS}
+    total_hc_onsite = 0
+    total_hc_transfer = 0
+    total_hc_online = 0
+
+    for plat in dev_platforms:
+        if plat not in wb.sheetnames:
+            continue
+        ws = wb[plat]
+        phc = hc.get(plat, {"现场": 0, "转线上": 0, "线上": 0})
+        if is_exact_snapshot:
+            total_hc_onsite += phc["现场"]
+            total_hc_transfer += phc["转线上"]
+            total_hc_online += phc["线上"]
+
+        for r in range(6, ws.max_row + 1):
+            d = ws.cell(row=r, column=1).value
+            if not d or not hasattr(d, 'strftime'):
+                continue
+            if d.strftime('%Y-%m-%d') > target_date:
+                break
+            for field, col in _DAILY_COLS.items():
+                v = ws.cell(row=r, column=col).value
+                try: totals[field] += float(v) if v is not None else 0.0
+                except: pass
+
+    wb.close()
+
+    # Compute derived fields (only if HC is valid)
+    total_ftd = int(totals["FTD"])
+    day_of_month = int(target_date.split('-')[2])
+    if is_exact_snapshot and total_hc_online > 0 and day_of_month > 0:
+        avg_ftd = total_ftd / total_hc_online / day_of_month
+        headcount_available = True
+    else:
+        avg_ftd = None
+        headcount_available = False
+
+    net_dep = totals["存款"] - totals["提款"]
+
+    data = {
+        "现场人数": total_hc_onsite if is_exact_snapshot else None,
+        "转线上人数": total_hc_transfer if is_exact_snapshot else None,
+        "线上人数": total_hc_online if is_exact_snapshot else None,
+        "人均开发": avg_ftd,
+        "总注册": int(totals["注册"]),
+        "总开发人数": total_ftd,
+        "首存金额": totals["首存金额"],
+        "充值人数": int(totals["充值人数"]),
+        "复存人数": int(totals["复存人数"]),
+        "存款": totals["存款"],
+        "提款": totals["提款"],
+        "存提差": net_dep,
+    }
+
+    meta = {
+        "source_type": source_type,
+        "source_file": os.path.basename(filepath),
+        "file_cutoff_date": file_cutoff_date,
+        "target_date": target_date,
+        "headcount_available": headcount_available,
+        "warning": warning,
+    }
+
+    return data, meta
+
+
 def _read_total_row(filepath):
     if not os.path.isfile(filepath):
         raise FileNotFoundError(f"文件不存在: {os.path.basename(filepath)}")
@@ -221,7 +343,7 @@ def _fmt_pct(pct):
 
 # ── Image builder ──
 
-def build_comparison_image(title, subtitle, cur_data, prev_data, cutoff_note=None):
+def build_comparison_image(title, subtitle, cur_data, prev_data, cutoff_note=None, theme="blue"):
     font_title = ImageFont.truetype(FONT_BOLD_PATH, 18)
     font_sub = ImageFont.truetype(FONT_PATH, 14)
     font_hdr = ImageFont.truetype(FONT_BOLD_PATH, 13)
@@ -244,25 +366,33 @@ def build_comparison_image(title, subtitle, cur_data, prev_data, cutoff_note=Non
     total_w = sum(col_widths)
     total_h = title_h + sub_h + hdr_h + len(rows) * row_h + cut_h + 28
 
-    DARK_BLUE = (31, 56, 100); LIGHT_BLUE = (220, 235, 252); WHITE = (255, 255, 255)
+    # Theme colors
+    if theme == "orange":
+        DARK_BG = (60, 60, 65); LIGHT_BG = (245, 240, 230)
+        TITLE_BG = (55, 55, 60); SUB_BG = (250, 240, 225)
+    else:
+        DARK_BG = (31, 56, 100); LIGHT_BG = (220, 235, 252)
+        TITLE_BG = (31, 56, 100); SUB_BG = (220, 235, 252)
+
+    WHITE = (255, 255, 255)
     GREEN_BG = (235, 255, 235); RED_BG = (255, 235, 235); GRAY_BG = (245, 245, 245)
     DARK = (33, 37, 41); GRAY = (140, 140, 140)
     YELLOW_BG = (255, 255, 220); ORANGE = (180, 120, 0)
 
     img = Image.new("RGB", (total_w, total_h), WHITE)
     draw = ImageDraw.Draw(img)
-    draw.rectangle([0, 0, total_w - 1, title_h], fill=DARK_BLUE)
+    draw.rectangle([0, 0, total_w - 1, title_h], fill=TITLE_BG)
     tw = font_title.getbbox(title)[2]
     draw.text(((total_w - tw) // 2, 10), title, fill=WHITE, font=font_title)
     y = title_h
-    draw.rectangle([0, y, total_w - 1, y + sub_h], fill=LIGHT_BLUE)
+    draw.rectangle([0, y, total_w - 1, y + sub_h], fill=SUB_BG)
     sw = font_sub.getbbox(subtitle)[2]
     draw.text(((total_w - sw) // 2, y + 4), subtitle, fill=DARK, font=font_sub)
     y += sub_h
     x = 0
     for ci, h in enumerate(headers):
         cw = col_widths[ci]
-        draw.rectangle([x, y, x + cw - 1, y + hdr_h], fill=DARK_BLUE)
+        draw.rectangle([x, y, x + cw - 1, y + hdr_h], fill=DARK_BG)
         tw = font_hdr.getbbox(h)[2]
         draw.text((x + (cw - tw) // 2, y + 7), h, fill=WHITE, font=font_hdr)
         x += cw
@@ -283,8 +413,10 @@ def build_comparison_image(title, subtitle, cur_data, prev_data, cutoff_note=Non
         dw = font_cutoff.getbbox(cutoff_note)[2]
         draw.text(((total_w - dw) // 2, y + 4), cutoff_note, fill=ORANGE, font=font_cutoff)
         y += cut_h
-    footer = f"@WFHDPbot | {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-    draw.text((10, y + 2), footer, fill=GRAY, font=font_footer)
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M')
+    footer = f"WFHDPbot  |  Generated: {ts}"
+    tw_f = font_footer.getbbox(footer)[2]
+    draw.text((total_w - tw_f - 10, total_h - 22), footer, fill=GRAY, font=font_footer)
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
@@ -346,24 +478,69 @@ def generate_comparison(target_date_str=None):
         prev_label = _date_label(prev_day_dt.strftime('%Y-%m-%d'))
         month_label = _date_label(prev_month_dt.strftime('%Y-%m-%d'))
 
-    # Collect files
+    # Collect files — allow full-month files when exact archive snapshots missing
+    def _resolve_file(archive_path, target_date_str, label):
+        if os.path.isfile(archive_path):
+            return archive_path
+        # Fallback: find any full-month file containing target_date
+        candidates = []
+        for folder in [DATA_FOLDER, os.path.join(SCRIPT_DIR, 'data', 'comparison_archive')]:
+            if not os.path.isdir(folder): continue
+            for f in os.listdir(folder):
+                if not f.endswith('.xlsx') or f.startswith('~$'): continue
+                if '劫持' in f: continue
+                if '线上办公' not in f: continue
+                candidates.append(os.path.join(folder, f))
+        for cand in candidates:
+            try:
+                wb = openpyxl.load_workbook(cand, data_only=True)
+                has_date = False
+                for sn in wb.sheetnames:
+                    if not sn.startswith('PH'): continue
+                    if len(sn) > 6: continue
+                    ws = wb[sn]
+                    for r in range(6, ws.max_row + 1):
+                        d = ws.cell(row=r, column=1).value
+                        if d and hasattr(d, 'strftime') and d.strftime('%Y-%m-%d') == target_date_str:
+                            has_date = True; break
+                    if has_date: break
+                wb.close()
+                if has_date:
+                    return cand
+            except: pass
+        return None
+
     files = {}
-    for key, path, label in [("cur", cur_path, cur_label),
-                              ("prev_day", prev_day_path, prev_label),
-                              ("prev_month", prev_month_path, month_label)]:
-        if not os.path.isfile(path):
-            errors.append(f"缺少文件: {label} ({os.path.basename(path)})")
+    for key, archive_path, target_date_str, label in [
+        ("cur", cur_path, cur_date, cur_label),
+        ("prev_day", prev_day_path, prev_day_dt.strftime('%Y-%m-%d'), prev_label),
+        ("prev_month", prev_month_path, prev_month_dt.strftime('%Y-%m-%d'), month_label),
+    ]:
+        resolved = _resolve_file(archive_path, target_date_str, label)
+        if resolved:
+            files[key] = resolved
         else:
-            files[key] = path
+            errors.append(f"缺少文件: {label} ({os.path.basename(archive_path)})")
 
     if errors:
         return False, "\n".join(errors), [], ""
 
-    # Read data
+    # Read data as-of specific dates using platform sheet summation
+    import _platform_config as _pcfg
+    dev_platforms = _pcfg.get_development_platforms()
+
+    date_map = {"cur": cur_date, "prev_day": prev_day_dt.strftime('%Y-%m-%d'),
+                "prev_month": prev_month_dt.strftime('%Y-%m-%d')}
     data = {}
+    meta = {}
+    warnings_list = []
     for key in files:
         try:
-            data[key] = _read_total_row(files[key])
+            d, m = _read_as_of_date(files[key], date_map[key], dev_platforms)
+            data[key] = d
+            meta[key] = m
+            if m.get("warning"):
+                warnings_list.append(f"{_date_label(date_map[key])}: {m['warning']}")
         except Exception as e:
             errors.append(f"读取失败 {os.path.basename(files[key])}: {e}")
     if errors:
@@ -378,47 +555,70 @@ def generate_comparison(target_date_str=None):
         cutoff = (f"⚠️ 标注为「{prev_label}」的源文件，工作簿内部【汇总】截止日显示为22日。"
                   f"本次仍按用户指定名称列为{prev_label}。")
 
+    # Collect all warnings for image footers
+    all_warnings = list(warnings_list)
+    day_warning = None
+    month_warning = None
+    if meta.get("prev_day", {}).get("warning"):
+        day_warning = meta["prev_day"]["warning"]
+    if meta.get("prev_month", {}).get("warning"):
+        month_warning = meta["prev_month"]["warning"]
+
     img1 = build_comparison_image(
         f"线上办公数据对比 — {cur_label} vs {prev_label}",
         f"数据口径：{cur_label} 与 {prev_label} 当日汇总「总」行对比",
-        cur, prev_day, cutoff_note=cutoff)
+        cur, prev_day, cutoff_note=cutoff or day_warning)
     results.append((img1, f"📊 {cur_label} vs {prev_label}"))
 
     img2 = build_comparison_image(
         f"线上办公数据对比 — {cur_label} vs {month_label}",
         f"数据口径：{cur_label} 与 {month_label} 当日汇总「总」行对比",
-        cur, prev_month)
+        cur, prev_month, cutoff_note=month_warning)
     results.append((img2, f"📊 {cur_label} vs {month_label}"))
 
-    # Conclusion
+    # Conclusion — handle None HC gracefully
     def _pct(cur_d, prev_d, label):
-        cv = cur_d.get(label, 0); pv = prev_d.get(label, 0)
-        if cv is None or pv is None: return f"• {label}数据不可用"
+        cv = cur_d.get(label); pv = prev_d.get(label)
+        if cv is None or pv is None: return f"• {label}: 无法计算（缺少历史快照数据）"
         diff, pct, arrow = _calc(cv, pv)
-        if pct is None: return f"• {label}无法计算（对比日数值为0）"
+        if pct is None: return f"• {label}: 无法计算（对比日数值为0）"
         direction = "增长" if pct > 0 else ("下降" if pct < 0 else "持平")
         return f"• {label}{direction} {abs(pct):.1f}%"
+
+    def _build_day_conclusion():
+        lines = []
+        # Always include cumulative indicators
+        lines.append(_pct(cur, prev_day, '总开发人数'))
+        lines.append(_pct(cur, prev_day, '首存金额'))
+        lines.append(_pct(cur, prev_day, '存提差'))
+        # 人均开发 only if both sides have HC
+        if _pct(cur, prev_day, '人均开发') is not None:
+            lines.append(_pct(cur, prev_day, '人均开发'))
+        return "\n".join(lines)
+
+    def _build_month_conclusion():
+        lines = []
+        lines.append(_pct(cur, prev_month, '线上人数'))
+        lines.append(_pct(cur, prev_month, '人均开发'))
+        lines.append(_pct(cur, prev_month, '总开发人数'))
+        # 提款 vs 存提差
+        _, wdr_pct, _ = _calc(cur.get("提款", 0), prev_month.get("提款", 0))
+        _, diff_pct, _ = _calc(cur.get("存提差", 0), prev_month.get("存提差", 0))
+        if wdr_pct is not None and diff_pct is not None and wdr_pct > 0 and diff_pct < 0:
+            lines.append(f"• 提款增长较快，导致存提差下降 {abs(diff_pct):.1f}%")
+        elif wdr_pct is not None and diff_pct is not None:
+            lines.append(f"• 提款变化 {wdr_pct:+.1f}%，存提差变化 {diff_pct:+.1f}%")
+        else:
+            lines.append("• 提款与存提差无法计算")
+        return "\n".join(lines)
 
     conclusion = (
         f"📊 线上办公数据对比结论\n\n"
         f"【{cur_label} vs {prev_label}】\n"
-        f"{_pct(cur, prev_day, '总开发人数')}\n"
-        f"{_pct(cur, prev_day, '首存金额')}\n"
-        f"{_pct(cur, prev_day, '存提差')}\n"
-        f"{_pct(cur, prev_day, '人均开发')}\n\n"
+        f"{_build_day_conclusion()}\n\n"
         f"【{cur_label} vs {month_label}】\n"
-        f"{_pct(cur, prev_month, '线上人数')}\n"
-        f"{_pct(cur, prev_month, '人均开发')}\n"
-        f"{_pct(cur, prev_month, '总开发人数')}\n"
+        f"{_build_month_conclusion()}"
     )
-    _, wdr_pct, _ = _calc(cur.get("提款", 0), prev_month.get("提款", 0))
-    _, diff_pct, _ = _calc(cur.get("存提差", 0), prev_month.get("存提差", 0))
-    if wdr_pct is not None and diff_pct is not None and wdr_pct > 0 and diff_pct < 0:
-        conclusion += f"• 提款增长较快，导致存提差下降 {abs(diff_pct):.1f}%"
-    elif wdr_pct is not None and diff_pct is not None:
-        conclusion += f"• 提款变化 {wdr_pct:+.1f}%，存提差变化 {diff_pct:+.1f}%"
-    else:
-        conclusion += "• 提款与存提差无法计算"
 
     return True, "", results, conclusion
 

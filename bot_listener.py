@@ -200,6 +200,75 @@ def _pin_push_summary():
 
 PUSH_HIJACK_SCRIPT = os.path.join(SCRIPT_DIR, "push_hijack.py")
 
+def _send_photo_file(filepath, caption=None):
+    """Send a PNG image file to Telegram. Uses existing stable multipart format."""
+    if not os.path.isfile(filepath):
+        log(f"send_photo_file: file not found: {filepath}")
+        return False
+    boundary = "----WebKitFormBoundary" + os.urandom(8).hex()
+    body = io.BytesIO()
+    body.write(f"--{boundary}\r\n".encode())
+    body.write(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n'.encode())
+    body.write(f"{CHAT_ID}\r\n".encode())
+    if caption:
+        body.write(f"--{boundary}\r\n".encode())
+        body.write(f'Content-Disposition: form-data; name="caption"\r\n\r\n'.encode())
+        body.write(f"{caption}\r\n".encode('utf-8'))
+    body.write(f"--{boundary}\r\n".encode())
+    body.write(f'Content-Disposition: form-data; name="photo"; filename="screenshot.png"\r\n'.encode())
+    body.write(f"Content-Type: image/png\r\n\r\n".encode())
+    with open(filepath, "rb") as f:
+        body.write(f.read())
+    body.write(f"\r\n--{boundary}--\r\n".encode())
+    body.seek(0)
+    url = f"{API}/sendPhoto"
+    req = urllib.request.Request(url, data=body.read(),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
+    try:
+        resp = urllib.request.urlopen(req, timeout=30)
+        return json.loads(resp.read()).get("ok", False)
+    except Exception as e:
+        log(f"send_photo_file error: {e}")
+        return False
+
+
+def _send_hijack_comparison(target_date=None, dry_run=False):
+    """Generate and send PH33 comparison combined image.
+    Args: target_date='2026-07-26' or None (uses today).
+    Returns dict with result details."""
+    import hijack_comparison_push as hcp
+    from datetime import datetime as _dt
+    if target_date is None:
+        target_date = _dt.now().strftime('%Y-%m-%d')
+
+    result = {"success": False, "dry_run": dry_run, "target_date": target_date, "steps": []}
+
+    ok, err, img_bytes, caption, meta = hcp.generate_hijack_comparison(target_date)
+    if not ok:
+        result["error"] = err
+        if not dry_run: send_message(f"PH33对比生成失败: {err}")
+        return result
+
+    fpath = os.path.join(SCRIPT_DIR, 'data', 'generated', f'hijack_compare_{target_date}.png')
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    with open(fpath, 'wb') as f: f.write(img_bytes)
+
+    result["steps"].append({
+        "order": 2, "type": "hijack_comparison",
+        "path": fpath, "size": len(img_bytes),
+        "month_available": meta.get("month_available"),
+        "sent": False
+    })
+
+    if not dry_run:
+        sent = _send_photo_file(fpath, caption)
+        result["steps"][-1]["sent"] = sent
+        if not sent:
+            send_message(f"⚠️ PH33对比图发送失败")
+
+    result["success"] = True
+    return result
+
 
 def run_en_push():
     """Run the English version push script."""
@@ -214,41 +283,108 @@ def run_en_push():
         return f"EN push failed: {e}"
 
 
-def run_hijack_push(mode="data"):
-    """Run the hijack push script.
-    mode: "data"=推送2, "hijack"=推送3, "hr"=推送4, "all_hijack"=2+3+4
-    On Ubuntu: returns a friendly message instead of crashing."""
+def run_hijack_push(mode="data", dry_run=False, target_date=None):
+    """Run the hijack push script. Returns unified dict with steps.
+    dry_run=True: generates images via --dry-run flag, no Telegram API calls."""
     try:
-        def _run_one(m, extra_args=None):
-            cmd = [sys.executable, PUSH_HIJACK_SCRIPT]
-            if extra_args:
-                cmd.extend(extra_args)
+        def _run_summary_only():
+            """Run push_hijack.py hijack --summary-only --output-json. Returns parsed JSON dict."""
+            cmd = [sys.executable, PUSH_HIJACK_SCRIPT, "hijack",
+                   "--summary-only", "--output-json"]
+            if dry_run:
+                cmd.append("--dry-run")
+            if target_date:
+                cmd.extend(["--target-date", target_date])
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=SCRIPT_DIR)
             out = r.stdout.strip()
-            # Detect Windows-only rejection
             if r.returncode != 0 and "only available on Windows" in (out + r.stderr):
-                return "此功能仅支持 Windows"
-            if r.returncode != 0:
-                return f"执行失败 (exit {r.returncode}): {out[:100]}"
-            return out[:200]
+                return {"success": False, "error": "此功能仅支持 Windows", "raw": out}
+            try:
+                import json as _json
+                return _json.loads(out)
+            except Exception:
+                return {"success": False, "error": f"JSON parse failed (exit {r.returncode})", "raw": out[:200]}
+
+        if target_date is None:
+            from datetime import datetime as _dt
+            target_date = _dt.now().strftime('%Y-%m-%d')
+
+        base_result = {"success": True, "dry_run": dry_run, "target_date": target_date, "steps": []}
+
+        def _add_step(order, stype, path=None, size=None, sent=False, **extra):
+            step = {"order": order, "type": stype, "sent": sent}
+            if path: step["path"] = path
+            if size: step["size"] = size
+            step.update(extra)
+            base_result["steps"].append(step)
 
         if mode == "hijack":
-            return _run_one("hijack", ["hijack"])
+            # Step 1: summary-only (generates screenshot, no xlsx)
+            sum_result = _run_summary_only()
+            if not sum_result.get("success"):
+                base_result["success"] = False
+                base_result["error"] = sum_result.get("error", "unknown")
+                return base_result
+
+            sd = sum_result.get("summary", {})
+            ss_path = sd.get("path", "")
+            ss_size = sd.get("size", 0) if sd.get("size") else 0
+            xlsx_path = sum_result.get("xlsx", {}).get("path", "")
+
+            if not dry_run and ss_path and os.path.isfile(ss_path):
+                _send_photo_file(ss_path)
+
+            _add_step(1, "hijack_summary", path=ss_path, size=ss_size,
+                      source_file=sd.get("source_file"), sent=not dry_run)
+
+            # Step 2: comparison combined image
+            comp = _send_hijack_comparison(target_date=target_date, dry_run=dry_run)
+            if comp.get("success"):
+                for s in comp.get("steps", []):
+                    s["order"] = len(base_result["steps"]) + 1
+                    base_result["steps"].append(s)
+            else:
+                base_result["success"] = False
+                base_result["error"] = comp.get("error", "unknown")
+
+            # Step 3: xlsx file (last)
+            if not dry_run and xlsx_path and os.path.isfile(xlsx_path):
+                from push_hijack import send_document as _hj_send_doc
+                _hj_send_doc(xlsx_path)
+            _add_step(3, "xlsx", path=xlsx_path, sent=not dry_run,
+                      skipped_in_dry_run=dry_run)
+            return base_result
+
         elif mode == "hr":
-            return _run_one("hr", ["hr"])
+            ok, out = _run_subprocess("hr")
+            base_result["success"] = ok
+            _add_step(1, "hijack_hr", sent=not dry_run, output=out[:200])
+            return base_result
+
         elif mode == "all_hijack":
-            results = []
-            for m, label in [("data", "推送2-数据"), ("hijack", "推送3-劫持办公"), ("hr", "推送4-劫持人事")]:
-                extra = ["hijack"] if m == "hijack" else (["hr"] if m == "hr" else None)
-                r = _run_one(m, extra)
-                results.append(f"[{label}] {r}")
+            import time as _t
+            for m in ["data", "hijack", "hr"]:
+                ok, out = _run_subprocess(m)
+                if not ok: base_result["success"] = False
+                _add_step(len(base_result["steps"]) + 1, m, sent=not dry_run, output=out[:200])
+                if m == "hijack":
+                    comp = _send_hijack_comparison(target_date=target_date, dry_run=dry_run)
+                    if comp.get("success"):
+                        for s in comp.get("steps", []):
+                            s["order"] = len(base_result["steps"]) + 1
+                            base_result["steps"].append(s)
                 if m != "hr":
-                    import time as _t; _t.sleep(2)
-            return "\n".join(results)
-        else:
-            return _run_one("data")
+                    _t.sleep(2)
+            return base_result
+
+        else:  # "data"
+            ok, out = _run_subprocess("data")
+            base_result["success"] = ok
+            _add_step(1, "data", sent=not dry_run, output=out[:200])
+            return base_result
+
     except Exception as e:
-        return f"Hijack push ({mode}) failed: {e}"
+        return {"success": False, "error": str(e), "dry_run": dry_run, "target_date": target_date, "steps": []}
 
 
 def api_call(method, payload):

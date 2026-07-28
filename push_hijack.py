@@ -522,10 +522,136 @@ def run_data_push():
 
 
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "data"
-    if mode == "hijack":
-        run_hijack_push()
-    elif mode == "hr":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", nargs="?", default="data", choices=["data","hijack","hr"])
+    parser.add_argument("--dry-run", action="store_true", help="Generate images only, skip Telegram")
+    parser.add_argument("--summary-only", action="store_true", help="Only generate summary screenshot, skip xlsx")
+    parser.add_argument("--output-json", action="store_true", help="Output structured JSON to stdout")
+    parser.add_argument("--target-date", type=str, default=None, help="Target date YYYY-MM-DD")
+    args = parser.parse_args()
+
+    # When output-json: redirect logs to stderr, save original stdout for JSON
+    _json_stdout = sys.stdout
+    if args.output_json:
+        sys.stdout = sys.stderr
+
+    if args.dry_run:
+        def send_photo(file_path, caption=None):
+            log(f"[DRY-RUN] Would send photo: {file_path}")
+            return {"ok": True}
+        def send_document(file_path, caption=None):
+            log(f"[DRY-RUN] Would send document: {file_path}")
+            return {"ok": True}
+
+    if args.mode == "hijack":
+        hj_office_path = find_hijack_office_excel()
+        if not hj_office_path:
+            result = {"success": False, "error": "Hijack office Excel not found"}
+            if args.output_json:
+                print(json.dumps(result, ensure_ascii=False), file=_json_stdout)
+            sys.exit(1)
+
+        # Read data date from Excel
+        data_date = None
+        try:
+            wb_date = openpyxl.load_workbook(hj_office_path, data_only=True)
+            if "当天数据汇总" in wb_date.sheetnames:
+                ws_date = wb_date["当天数据汇总"]
+                for r in range(1, 3):
+                    for c in range(1, 20):
+                        v = ws_date.cell(row=r, column=c).value
+                        if v and hasattr(v, 'strftime'):
+                            data_date = v.strftime('%Y-%m-%d')
+                            break
+                    if data_date: break
+            wb_date.close()
+        except Exception:
+            pass
+
+        # Enforce target_date match
+        if args.target_date:
+            if not data_date:
+                result = {"success": False, "error": "Cannot verify source data date",
+                          "target_date": args.target_date, "source_file": hj_office_path}
+                if args.output_json:
+                    print(json.dumps(result, ensure_ascii=False), file=_json_stdout)
+                sys.exit(1)
+            if data_date != args.target_date:
+                result = {"success": False,
+                          "error": "Target date does not match source data date",
+                          "target_date": args.target_date, "data_date": data_date,
+                          "source_file": hj_office_path}
+                if args.output_json:
+                    print(json.dumps(result, ensure_ascii=False), file=_json_stdout)
+                sys.exit(1)
+
+        tmp_dir = tempfile.gettempdir()
+        ss_daily = os.path.join(tmp_dir, "hijack_push_当天数据汇总.png")
+
+        ok1 = take_sheet_screenshot(hj_office_path, "当天数据汇总", ss_daily,
+                                     max_rows=3, max_cols=32, start_row=2)
+        if not ok1:
+            result = {"success": False, "error": "Screenshot failed"}
+            if args.output_json:
+                print(json.dumps(result, ensure_ascii=False), file=_json_stdout)
+            sys.exit(1)
+
+        # Read image dimensions
+        ss_width, ss_height = 0, 0
+        try:
+            from PIL import Image as PILImg
+            im = PILImg.open(ss_daily)
+            ss_width, ss_height = im.size
+        except Exception:
+            pass
+
+        ss_size = os.path.getsize(ss_daily) if os.path.isfile(ss_daily) else 0
+
+        if args.summary_only:
+            # summary-only: NEVER send anything, just generate and return JSON
+            result = {
+                "success": True, "mode": "hijack", "dry_run": args.dry_run,
+                "summary_only": True, "target_date": args.target_date,
+                "summary": {
+                    "path": ss_daily, "size": ss_size,
+                    "width": ss_width, "height": ss_height,
+                    "source_file": hj_office_path,
+                    "target_date": args.target_date,
+                    "data_date": data_date,
+                    "sent": False,
+                },
+                "xlsx": {"path": hj_office_path, "sent": False}
+            }
+        else:
+            # Full mode: bot_listener controls sends via our send functions
+            if not args.dry_run:
+                send_photo(ss_daily)
+                if hj_office_path and os.path.exists(hj_office_path):
+                    send_document(hj_office_path)
+            result = {
+                "success": True, "mode": "hijack", "dry_run": args.dry_run,
+                "target_date": args.target_date,
+                "summary": {
+                    "path": ss_daily, "size": ss_size,
+                    "width": ss_width, "height": ss_height,
+                    "source_file": hj_office_path,
+                    "target_date": args.target_date,
+                    "data_date": data_date,
+                    "sent": not args.dry_run,
+                },
+                "xlsx": {"path": hj_office_path, "sent": not args.dry_run}
+            }
+            # Cleanup temp (non-summary mode uses send_photo which reads file, keep until sent)
+            try:
+                if os.path.exists(ss_daily): os.remove(ss_daily)
+            except: pass
+
+        if args.output_json:
+            print(json.dumps(result, ensure_ascii=False), file=_json_stdout)
+        sys.exit(0 if result.get("success") else 1)
+
+    elif args.mode == "hr":
         run_hr_push()
     else:
         run_data_push()

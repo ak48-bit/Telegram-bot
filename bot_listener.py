@@ -377,6 +377,62 @@ def run_hijack_push(mode="data", dry_run=False, target_date=None):
                 _hj_send_doc(xlsx_path)
             _add_step(len(base_result["steps"]) + 1, "xlsx", path=xlsx_path,
                       sent=not dry_run, skipped_in_dry_run=dry_run)
+
+            # ── Archive snapshot (only after all 3 sends succeeded, only in non-dry-run) ──
+            if dry_run:
+                base_result["archive_success"] = None
+                base_result["archive_status"] = "skipped_dry_run"
+            elif not base_result["success"] or not xlsx_path or not os.path.isfile(xlsx_path):
+                base_result["archive_success"] = False
+                base_result["archive_status"] = "skipped_send_failed"
+            else:
+                try:
+                    import hashlib
+                    data_date = sd.get("data_date")
+                    if not data_date:
+                        base_result["archive_success"] = False
+                        base_result["archive_status"] = "missing_data_date"
+                        base_result["archive_error"] = "missing_excel_data_date"
+                        log("PH33 archive failed: missing Excel data_date")
+                    elif target_date and data_date != target_date:
+                        base_result["archive_success"] = False
+                        base_result["archive_status"] = "data_date_mismatch"
+                        base_result["archive_error"] = f"expected={target_date} actual={data_date}"
+                        log(f"PH33 archive failed: data_date mismatch target={target_date} actual={data_date}")
+                    else:
+                        archive_dest = os.path.join(SCRIPT_DIR, "data", "comparison_archive",
+                                                    f"hijack_{data_date}.xlsx")
+                        os.makedirs(os.path.dirname(archive_dest), exist_ok=True)
+                        base_result["archive_path"] = archive_dest
+                        base_result["archive_source_date"] = data_date
+
+                        if os.path.isfile(archive_dest):
+                            with open(xlsx_path, "rb") as f_src:
+                                src_sha = hashlib.sha256(f_src.read()).hexdigest()
+                            with open(archive_dest, "rb") as f_dst:
+                                dst_sha = hashlib.sha256(f_dst.read()).hexdigest()
+                            if src_sha == dst_sha:
+                                base_result["archive_success"] = True
+                                base_result["archive_status"] = "already_exists_same"
+                            else:
+                                base_result["success"] = False
+                                base_result["push_success"] = True
+                                base_result["archive_success"] = False
+                                base_result["archive_status"] = "conflict"
+                                base_result["archive_error"] = f"SHA diff: src={src_sha[:12]} dst={dst_sha[:12]}"
+                                log(f"PH33 archive conflict: {archive_dest}")
+                        else:
+                            shutil.copy2(xlsx_path, archive_dest)
+                            base_result["archive_success"] = True
+                            base_result["archive_status"] = "created"
+                            log(f"PH33 snapshot archived: hijack_{data_date}.xlsx")
+                except Exception as e:
+                    base_result["success"] = False
+                    base_result["archive_success"] = False
+                    base_result["archive_status"] = "error"
+                    base_result["archive_error"] = str(e)
+                    log(f"PH33 archive error: {e}")
+
             return base_result
 
         elif mode == "hr":

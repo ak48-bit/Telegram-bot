@@ -2228,7 +2228,15 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
         resolve_date = datetime.now()
         use_last_row = False
 
-    excel_file = find_monthly_file(resolve_date, ["线上办公数据汇"], exclude_kw=["劫持"])
+    # Resolve development file via active_month.json first
+    try:
+        _am_path, _am_name, _am_date, _am_errs = _plat.get_active_excel("development")
+        if _am_path and not target_date and not target_month:
+            excel_file = _am_path
+        else:
+            excel_file = find_monthly_file(resolve_date, ["线上办公数据汇"], exclude_kw=["劫持"])
+    except Exception:
+        excel_file = find_monthly_file(resolve_date, ["线上办公数据汇"], exclude_kw=["劫持"])
     hj_office_file = find_monthly_file(resolve_date, ["劫持", "办公数据汇总"], exclude_kw=["人事"])
     hj_hr_file = find_monthly_file(resolve_date, ["劫持", "人事数据汇总"])
 

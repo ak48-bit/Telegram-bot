@@ -219,6 +219,238 @@ def get_monthly_rows(region=None):
 #  Excel file resolution (UNIFIED — used by all checks and push)
 # ══════════════════════════════════════════════════════════════════════
 
+# active_month.json — unified month data source
+ACTIVE_MONTH_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "active_month.json"
+)
+
+
+def _load_active_month():
+    """Read active_month.json.
+    Returns (dict, None) on success.
+    Returns (None, error_msg) if file exists but is malformed.
+    Returns (None, None) if file does not exist (V1.0 compatibility → fallback)."""
+    if not os.path.isfile(ACTIVE_MONTH_FILE):
+        return None, None
+    try:
+        with open(ACTIVE_MONTH_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data, None
+    except json.JSONDecodeError as e:
+        return None, f"active_month.json JSON 格式错误: {str(e)[:60]}"
+    except OSError as e:
+        return None, f"active_month.json 读取失败: {str(e)[:60]}"
+
+
+def _resolve_data_folder():
+    """Resolve DATA_FOLDER: env var → config.json → default."""
+    env_val = os.environ.get("DATA_FOLDER", "").strip()
+    if env_val:
+        return env_val
+    _load()
+    cfg_folder = _cfg.get("data_folder", "").strip()
+    if cfg_folder:
+        return cfg_folder
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def _scan_latest(data_folder, keyword, exclude_kw=None):
+    """Scan for most recently modified xlsx matching keyword. Returns path or None."""
+    if not data_folder or not os.path.isdir(data_folder):
+        return None
+    best, best_mtime = None, 0
+    for f in os.listdir(data_folder):
+        if not f.endswith('.xlsx') or f.startswith('~$'):
+            continue
+        if keyword not in f:
+            continue
+        if exclude_kw and exclude_kw in f:
+            continue
+        path = os.path.join(data_folder, f)
+        mtime = os.path.getmtime(path)
+        if mtime > best_mtime:
+            best_mtime = mtime
+            best = path
+    return best
+
+
+def _detect_data_date(path):
+    """Detect data cutoff date from an Excel file.
+    Priority: datetime cells → title month + platform sheet latest day.
+    Returns 'YYYY-MM-DD' or None."""
+    import re
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb[wb.sheetnames[0]]
+
+        # 1. Direct datetime cells in rows 1-5
+        for r in range(1, 6):
+            for c in range(1, 20):
+                v = ws.cell(row=r, column=c).value
+                if v and hasattr(v, 'strftime'):
+                    wb.close()
+                    return v.strftime('%Y-%m-%d')
+
+        # 2. Title month + platform sheet latest day
+        # Year priority: filename "26年" → 2026; fallback current year
+        year = None
+        m_year = re.search(r'(?:^|\D)(\d{2})年', os.path.basename(path))
+        if m_year:
+            year = 2000 + int(m_year.group(1))
+        if not year:
+            year = datetime.now().year
+        month = None
+        for r in range(1, 4):
+            for c in range(1, 8):
+                v = str(ws.cell(row=r, column=c).value or "")
+                m = re.search(r'(\d{1,2})\s*月', v)
+                if m:
+                    month = int(m.group(1))
+                    break
+            if month:
+                break
+
+        latest_day = 0
+        for sn in wb.sheetnames:
+            if not re.match(r'^(PH|BD|MM)\d', sn):
+                continue
+            try:
+                pws = wb[sn]
+                for row_idx in range(pws.max_row, 5, -1):
+                    d = pws.cell(row=row_idx, column=1).value
+                    if not d or not hasattr(d, 'strftime'):
+                        continue
+                    if month and d.month != month:
+                        continue
+                    # Prefer sheet's real year over filename/current
+                    if year is None:
+                        year = d.year
+                    # Check multiple business fields non-zero
+                    fields = [pws.cell(row=row_idx, column=c).value for c in (7, 8, 20, 11, 23, 24)]
+                    has_data = False
+                    for fv in fields:
+                        try:
+                            if fv is not None and float(fv) != 0:
+                                has_data = True
+                                break
+                        except (ValueError, TypeError):
+                            pass
+                    if has_data and d.day > latest_day:
+                        latest_day = d.day
+            except Exception:
+                continue
+        wb.close()
+        if latest_day > 0 and month:
+            return f"{year}-{month:02d}-{latest_day:02d}"
+        return None
+    except Exception:
+        return None
+
+
+def _verify_excel(path, kind, data_folder):
+    """Validate an Excel file for the given kind.
+    kind: 'development' | 'hijack'
+    Returns (ok, errors_list)."""
+    errors = []
+    fname = os.path.basename(path)
+    if not os.path.isfile(path):
+        return False, [f"文件不存在: {fname}"]
+
+    # Development must not be a hijack file
+    if kind == "development" and "劫持" in fname:
+        return False, [f"development 误指向劫持文件: {fname}"]
+    # Hijack must contain 劫持
+    if kind == "hijack" and "劫持" not in fname:
+        return False, [f"hijack 文件名称缺少「劫持」: {fname}"]
+
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, data_only=True)
+        wb.close()
+    except Exception as e:
+        return False, [f"Excel 无法读取: {fname} ({str(e)[:60]})"]
+
+    # data_date detection
+    date_found = _detect_data_date(path)
+    if not date_found:
+        return False, [f"data_date 无法识别: {fname}"]
+
+    return True, errors
+
+
+def get_active_excel(kind):
+    """Resolve the active Excel file for kind ('development'|'hijack').
+    Priority: active_month.json → config.json → auto-scan.
+    Returns (path, fname, data_date, errors) or (None, None, None, errors).
+    """
+    errors = []
+    data_folder = _resolve_data_folder()
+
+    candidate = None
+    am_error = None
+    # 1. active_month.json
+    am, am_error = _load_active_month()
+    if am_error:
+        # File exists but malformed → fail clearly, no silent fallback
+        return None, None, None, [am_error]
+    if am is not None:
+        # active_month.json EXISTS → all fields required, no silent fallback
+        missing = []
+        if "version" not in am:
+            missing.append("version")
+        for field in ("development", "hijack"):
+            val = am.get(field)
+            if not val or not str(val).strip():
+                missing.append(field)
+        if missing:
+            return None, None, None, [
+                f"active_month.json 缺少必填字段: {', '.join(missing)}"]
+        candidate = am[kind]
+    # 2. config.json active_excel_file (development only) — only if active_month absent
+    if am is None and candidate is None and kind == "development":
+        _load()
+        candidate = _cfg.get("active_excel_file", "").strip()
+
+    resolved_path = None
+    fname = None
+    if candidate:
+        fname = candidate
+        resolved_path = os.path.join(data_folder, candidate)
+    else:
+        # 3. auto-scan fallback
+        if kind == "development":
+            resolved_path = _scan_latest(data_folder, "线上办公数据汇总", "劫持")
+        else:
+            resolved_path = _scan_latest(data_folder, "劫持（线上办公数据汇总）")
+        if resolved_path:
+            fname = os.path.basename(resolved_path)
+
+    if not resolved_path:
+        return None, None, None, [f"{kind}: 未找到活动 Excel 文件"]
+
+    ok, verr = _verify_excel(resolved_path, kind, data_folder)
+    if not ok:
+        return None, None, None, verr
+
+    # Extract data_date (robust detection)
+    data_date = _detect_data_date(resolved_path)
+
+    return resolved_path, fname, data_date, errors
+
+
+def get_active_excel_verbose(kind):
+    """Detailed active Excel info for status output."""
+    path, fname, data_date, errors = get_active_excel(kind)
+    if not path:
+        return {"success": False, "kind": kind, "errors": errors}
+    return {
+        "success": True, "kind": kind, "path": path, "fname": fname,
+        "data_date": data_date, "size": os.path.getsize(path) if os.path.isfile(path) else 0,
+    }
+
+
 def find_main_excel(data_folder):
     """Return the active Excel file path as configured in config.json.
     Uses active_excel_file if set, otherwise falls back to searching.
@@ -761,8 +993,239 @@ def format_check_result(result):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  /platforms — runtime status
+#  /status and /data_status — admin commands
 # ══════════════════════════════════════════════════════════════════════
+
+def format_bot_status(data_folder=None):
+    """/status — bot + system + platform summary. Read-only."""
+    import sys, subprocess, platform
+    from datetime import datetime
+
+    lines = ["📊 <b>Bot 状态</b>", ""]
+
+    # Git
+    git_commit, git_branch = "N/A", "N/A"
+    try:
+        r = subprocess.run(["git", "log", "-1", "--oneline"], capture_output=True,
+                           text=True, timeout=5, cwd=os.path.dirname(os.path.abspath(__file__)))
+        if r.returncode == 0:
+            git_commit = r.stdout.strip()
+        r2 = subprocess.run(["git", "branch", "--show-current"], capture_output=True,
+                            text=True, timeout=5, cwd=os.path.dirname(os.path.abspath(__file__)))
+        if r2.returncode == 0:
+            git_branch = r2.stdout.strip()
+    except Exception:
+        pass
+
+    # Python + PID
+    py_ver = platform.python_version()
+    pid = os.getpid()
+
+    # Config version
+    v, u, _ = get_config_version()
+    v_str = str(v) if v is not None else "N/A"
+
+    lines.append("Bot 进程: 运行中（当前命令由 Bot 进程响应）")
+    lines.append(f"Commit: {git_commit}")
+    lines.append(f"分支: {git_branch}")
+    lines.append(f"Python: {py_ver}")
+    lines.append(f"PID: {pid}")
+    lines.append(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"配置版本: {v_str}")
+
+    # Platform lists
+    dev = get_development_platforms()
+    hij = get_hijack_platforms()
+    dis = get_disabled_platforms()
+    lines.append("")
+    lines.append(f"开发站点 ({len(dev)}): {', '.join(dev)}")
+    lines.append(f"劫持站点 ({len(hij)}): {', '.join(hij)}")
+    lines.append(f"停用站点 ({len(dis)}): {', '.join(dis)}")
+
+    # Instance count — safe read-only check on Windows
+    instance_count = "未检查"
+    try:
+        import subprocess as _sp
+        r = _sp.run(
+            ['powershell', '-NoProfile', '-Command',
+             "(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python3.13.exe' -and $_.CommandLine -like '*bot_listener*' }).Count"],
+            capture_output=True, text=True, timeout=10)
+        if r.returncode == 0 and r.stdout.strip().isdigit():
+            instance_count = r.stdout.strip()
+    except Exception:
+        pass
+    lines.append(f"bot_listener 实例数: {instance_count}")
+
+    return "\n".join(lines)
+
+
+def format_data_status(data_folder=None):
+    """/data_status — Excel + snapshot status. Read-only."""
+    from datetime import datetime, timedelta
+
+    lines = ["📊 <b>数据状态</b>", ""]
+
+    if data_folder is None:
+        data_folder = _resolve_data_folder()
+
+    # Development
+    dev_info = get_active_excel_verbose("development")
+    lines.append("【开发】")
+    if dev_info.get("success"):
+        lines.append(f"文件: {dev_info['fname']}")
+        lines.append(f"data_date: {dev_info.get('data_date', 'N/A')}")
+        lines.append(f"存在: {'是' if dev_info.get('size', 0) > 0 else '否'}")
+        dev_date = dev_info.get("data_date")
+    else:
+        lines.append(f"错误: {dev_info.get('errors', [])}")
+        dev_date = None
+
+    # Latest dev snapshot — only standard names, sorted by parsed date
+    import re as _re_snap
+    archive_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'comparison_archive')
+    dev_snaps = []
+    if os.path.isdir(archive_dir):
+        for f in os.listdir(archive_dir):
+            m = _re_snap.match(r'^development_(\d{4}-\d{2}-\d{2})\.xlsx$', f)
+            if m:
+                dev_snaps.append((m.group(1), f))
+    dev_snaps.sort(key=lambda x: x[0])
+    latest_dev_snap = dev_snaps[-1][1] if dev_snaps else "(无)"
+    lines.append(f"最新 development 快照: {latest_dev_snap}")
+    lines.append("")
+
+    # Hijack
+    hij_info = get_active_excel_verbose("hijack")
+    lines.append("【劫持】")
+    if hij_info.get("success"):
+        lines.append(f"文件: {hij_info['fname']}")
+        lines.append(f"data_date: {hij_info.get('data_date', 'N/A')}")
+        lines.append(f"存在: {'是' if hij_info.get('size', 0) > 0 else '否'}")
+        hij_date = hij_info.get("data_date")
+    else:
+        lines.append(f"错误: {hij_info.get('errors', [])}")
+        hij_date = None
+
+    hij_snaps = []
+    if os.path.isdir(archive_dir):
+        for f in os.listdir(archive_dir):
+            m = _re_snap.match(r'^hijack_(\d{4}-\d{2}-\d{2})\.xlsx$', f)
+            if m:
+                hij_snaps.append((m.group(1), f))
+    hij_snaps.sort(key=lambda x: x[0])
+    latest_hij_snap = hij_snaps[-1][1] if hij_snaps else "(无)"
+    lines.append(f"最新 hijack 快照: {latest_hij_snap}")
+    lines.append("")
+
+    # Yesterday / last-month snapshots + compare feasibility
+    def _snap_exists(kind, date_str):
+        return os.path.isfile(os.path.join(archive_dir, f"{kind}_{date_str}.xlsx"))
+
+    lines.append("【对比可用性】")
+    if dev_date:
+        try:
+            dt = datetime.strptime(dev_date, '%Y-%m-%d')
+            y = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
+            m = (dt.replace(month=dt.month - 1) if dt.month > 1
+                 else dt.replace(year=dt.year - 1, month=12)).strftime('%Y-%m-%d')
+            lines.append(f"昨日快照 {y}: {'存在' if _snap_exists('development', y) else '缺失'}")
+            lines.append(f"上月同日 {m}: {'存在' if _snap_exists('development', m) else '缺失'}")
+            dev_ok = _snap_exists('development', y) and _snap_exists('development', m)
+            lines.append(f"开发对比图: {'可以生成' if dev_ok else '部分/无法生成（缺失快照显示警告）'}")
+        except Exception:
+            pass
+
+    if hij_date:
+        try:
+            dt = datetime.strptime(hij_date, '%Y-%m-%d')
+            y = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
+            m = (dt.replace(month=dt.month - 1) if dt.month > 1
+                 else dt.replace(year=dt.year - 1, month=12)).strftime('%Y-%m-%d')
+            lines.append(f"劫持昨日快照 {y}: {'存在' if _snap_exists('hijack', y) else '缺失'}")
+            lines.append(f"劫持上月同日 {m}: {'存在' if _snap_exists('hijack', m) else '缺失'}")
+        except Exception:
+            pass
+
+    return "\n".join(lines)
+
+
+def _snapshot_detail(kind, date_str):
+    """Check a single snapshot file: exists, size, opens, internal date match.
+    Returns a formatted line."""
+    archive_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'comparison_archive')
+    fname = f"{kind}_{date_str}.xlsx"
+    path = os.path.join(archive_dir, fname)
+
+    if not os.path.isfile(path):
+        return f"  ❌ {fname} — 不存在"
+
+    size = os.path.getsize(path)
+    if size == 0:
+        return f"  ⚠️ {fname} — 存在但 0 字节"
+
+    # Try open
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(path, data_only=True)
+        wb.close()
+    except Exception as e:
+        return f"  ⚠️ {fname} — 存在 {size:,}B 但无法打开 ({str(e)[:40]})"
+
+    # Internal date
+    internal = _detect_data_date(path)
+    date_match = "匹配" if internal == date_str else (f"不匹配({internal})" if internal else "无法识别")
+    ok_mark = "✅" if internal == date_str else "⚠️"
+    return f"  {ok_mark} {fname} — {size:,}B 可打开 内部日期:{date_match}"
+
+
+def format_snapshot_check(data_folder=None):
+    """Snapshot check — target-date-derived existence + integrity. Read-only."""
+    lines = ["📊 <b>快照检查</b>", ""]
+
+    # Resolve both current Excels
+    dev_info = get_active_excel_verbose("development")
+    hij_info = get_active_excel_verbose("hijack")
+
+    def _targets(date_str):
+        from datetime import timedelta
+        dt = datetime.strptime(date_str, '%Y-%m-%d')
+        y = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
+        m = (dt.replace(month=dt.month - 1) if dt.month > 1
+             else dt.replace(year=dt.year - 1, month=12)).strftime('%Y-%m-%d')
+        return y, m
+
+    # Development
+    lines.append("【开发】")
+    if dev_info.get("success"):
+        dev_date = dev_info.get("data_date")
+        lines.append(f"当前 data_date: {dev_date}")
+        if dev_date:
+            y, m = _targets(dev_date)
+            lines.append(f"昨日目标: {y}")
+            lines.append(_snapshot_detail("development", y))
+            lines.append(f"上月同日目标: {m}")
+            lines.append(_snapshot_detail("development", m))
+    else:
+        lines.append(f"❌ {dev_info.get('errors', [])}")
+    lines.append("")
+
+    # Hijack
+    lines.append("【劫持】")
+    if hij_info.get("success"):
+        hij_date = hij_info.get("data_date")
+        lines.append(f"当前 data_date: {hij_date}")
+        if hij_date:
+            y, m = _targets(hij_date)
+            lines.append(f"昨日目标: {y}")
+            lines.append(_snapshot_detail("hijack", y))
+            lines.append(f"上月同日目标: {m}")
+            lines.append(_snapshot_detail("hijack", m))
+    else:
+        lines.append(f"❌ {hij_info.get('errors', [])}")
+    lines.append("")
+
+    return "\n".join(lines)
+
 
 def format_platform_status(data_folder=None):
     """Upgraded /platforms output with runtime Sheet/Daily/Monthly checks."""

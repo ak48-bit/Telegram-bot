@@ -16,6 +16,11 @@
 !sync_excel_to_do.ps1
 !install_excel_sync_task.ps1
 !bot_watchdog.ps1
+!hijack_comparison_push.py
+
+# ── V1.1 month config + release doc ──
+!active_month.json
+!WFHDPBOT_V1_RELEASE.md
 
 # ── Startup scripts ──
 !*.bat

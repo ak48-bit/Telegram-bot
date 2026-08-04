@@ -1184,6 +1184,63 @@ def main():
                             status_text = _plat_cfg.format_platform_status(DATA_FOLDER)
                             send_message(status_text)
 
+                    elif cmd in ("/status", "/状态"):
+                        if _plat_cfg is None:
+                            send_message("❌ 平台配置模块未加载")
+                            continue
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
+                        if not admin_ids:
+                            send_message("❌ 尚未配置 Admin Telegram ID，状态命令已禁用")
+                            continue
+                        if sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作")
+                            continue
+                        try:
+                            status_text = _plat_cfg.format_bot_status(DATA_FOLDER)
+                            send_message(status_text)
+                        except Exception as e:
+                            log(f"/status error: {e}")
+                            send_message("❌ 状态获取失败")
+
+                    elif cmd in ("/snapshot_check", "/快照检查"):
+                        if _plat_cfg is None:
+                            send_message("❌ 平台配置模块未加载")
+                            continue
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
+                        if not admin_ids:
+                            send_message("❌ 尚未配置 Admin Telegram ID，快照检查命令已禁用")
+                            continue
+                        if sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作")
+                            continue
+                        try:
+                            status_text = _plat_cfg.format_snapshot_check(DATA_FOLDER)
+                            send_message(status_text)
+                        except Exception as e:
+                            log(f"/snapshot_check error: {e}")
+                            send_message("❌ 快照检查失败")
+
+                    elif cmd in ("/data_status", "/数据状态"):
+                        if _plat_cfg is None:
+                            send_message("❌ 平台配置模块未加载")
+                            continue
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
+                        if not admin_ids:
+                            send_message("❌ 尚未配置 Admin Telegram ID，数据状态命令已禁用")
+                            continue
+                        if sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作")
+                            continue
+                        try:
+                            status_text = _plat_cfg.format_data_status(DATA_FOLDER)
+                            send_message(status_text)
+                        except Exception as e:
+                            log(f"/data_status error: {e}")
+                            send_message("❌ 数据状态获取失败")
+
                     elif cmd in ("/reload_config", "/重新加载配置"):
                         if _plat_cfg is None:
                             send_message("❌ 平台配置模块未加载")

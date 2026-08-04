@@ -116,7 +116,17 @@ def send_document(file_path, caption=None):
 
 
 def find_main_excel():
-    """Find the main ground push Excel file. Returns (workbook_name, file_path)."""
+    """Find the main ground push Excel file. Returns (workbook_name, file_path).
+    Uses unified active_month.json resolution for development."""
+    try:
+        import _platform_config as _pc
+        path, fname, data_date, errors = _pc.get_active_excel("development")
+        if path:
+            return fname, path
+        log(f"find_main_excel via active_month failed: {errors}")
+    except Exception as e:
+        log(f"find_main_excel unified resolve error: {e}")
+    # Fallback: scan (existing behavior)
     main_file = None
     for f in sorted(os.listdir(DATA_FOLDER), reverse=True):
         if not f.endswith('.xlsx'):
@@ -132,7 +142,16 @@ def find_main_excel():
 
 
 def find_hijack_office_excel():
-    """Find hijack office Excel file."""
+    """Find hijack office Excel file. Uses unified active_month.json resolution."""
+    try:
+        import _platform_config as _pc
+        path, fname, data_date, errors = _pc.get_active_excel("hijack")
+        if path:
+            return path
+        log(f"find_hijack_office_excel via active_month failed: {errors}")
+    except Exception as e:
+        log(f"find_hijack_office_excel unified resolve error: {e}")
+    # Fallback: scan (existing behavior)
     for f in sorted(os.listdir(DATA_FOLDER), reverse=True):
         if not f.endswith('.xlsx') or f.startswith('~$') or '副本' in f:
             continue

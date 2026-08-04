@@ -448,8 +448,13 @@ def generate_comparison(target_date_str=None):
         month_label = _date_label(prev_month_dt.strftime('%Y-%m-%d'))
 
     else:
-        # /compare mode: auto-detect from live file
-        live_path = _find_latest(DATA_FOLDER, "线上办公数据汇总", "劫持")
+        # /compare mode: resolve live file via active_month.json first
+        import _platform_config as _pcfg
+        _am_path, _am_name, _am_date, _am_errs = _pcfg.get_active_excel("development")
+        if _am_path:
+            live_path = _am_path
+        else:
+            live_path = _find_latest(DATA_FOLDER, "线上办公数据汇总", "劫持")
         if not live_path:
             return False, "未找到当前实时开发Excel", [], ""
 
@@ -459,7 +464,11 @@ def generate_comparison(target_date_str=None):
 
         # Snapshot live file
         _snapshot(live_path, "development")
-        hij_path = _find_latest(DATA_FOLDER, "劫持（线上办公数据汇总）")
+        _hij_path, _hij_name, _hij_date, _hij_errs = _pcfg.get_active_excel("hijack")
+        if _hij_path:
+            hij_path = _hij_path
+        else:
+            hij_path = _find_latest(DATA_FOLDER, "劫持（线上办公数据汇总）")
         if hij_path:
             _snapshot(hij_path, "hijack")
 

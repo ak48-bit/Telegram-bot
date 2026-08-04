@@ -146,7 +146,10 @@ def generate_hijack_comparison(target_date_str):
         prev_month_dt = (target_dt.replace(month=target_dt.month - 1) if target_dt.month > 1
                          else target_dt.replace(year=target_dt.year - 1, month=12))
     except Exception as e:
-        return False, f"日期格式错误: {target_date_str}", None, "", {}
+        return False, f"日期格式错误: {target_date_str}", None, "", {
+            "requested_target_date": target_date_str,
+            "error": str(e),
+        }
 
     prev_day_str = prev_day_dt.strftime('%Y-%m-%d')
     prev_month_str = prev_month_dt.strftime('%Y-%m-%d')
@@ -155,37 +158,56 @@ def generate_hijack_comparison(target_date_str):
     prev_day_path = os.path.join(ARCHIVE_DIR, f'hijack_{prev_day_str}.xlsx')
     prev_month_path = os.path.join(ARCHIVE_DIR, f'hijack_{prev_month_str}.xlsx')
 
-    # Read current and previous day
+    # Read current day (required)
     try:
         cur_data = _read_hijack_row(cur_path)
     except Exception as e:
-        return False, f"读取当前日快照失败: {e}", None, "", {}
+        return False, f"读取当前日快照失败: {e}", None, "", {
+            "requested_target_date": target_date_str,
+            "resolved_target_date": target_date_str,
+            "yesterday_date": prev_day_str,
+            "month_date": prev_month_str,
+            "error": str(e),
+        }
 
+    # Read previous day (optional)
+    prev_day_data = None
+    yesterday_available = True
     try:
         prev_day_data = _read_hijack_row(prev_day_path)
-    except Exception as e:
-        return False, f"读取前一日快照失败: {e}", None, "", {}
+    except Exception:
+        yesterday_available = False
 
-    # Build day comparison section
-    day_title = f'{target_dt.month}月{target_dt.day}日 vs {prev_day_dt.month}月{prev_day_dt.day}日 | PH33劫持数据对比'
-    day_sub = f'数据口径：PH33 当天数据汇总'
-    img_day = _build_section_image(day_title, day_sub, cur_data, prev_day_data)
-
-    # Build month section
-    month_title = f'{target_dt.month}月{target_dt.day}日 vs {prev_month_dt.month}月{prev_month_dt.day}日 | PH33劫持数据对比'
-    month_sub = f'数据口径：PH33 当天数据汇总'
-
+    # Read previous month (optional)
+    prev_month_data = None
+    month_available = True
     if os.path.isfile(prev_month_path):
         try:
             prev_month_data = _read_hijack_row(prev_month_path)
-            img_month = _build_section_image(month_title, month_sub, cur_data, prev_month_data)
-            month_available = True
-        except Exception as e:
-            img_month = _build_warning_section(prev_month_str)
+        except Exception:
             month_available = False
     else:
-        img_month = _build_warning_section(prev_month_str)
         month_available = False
+
+    missing_snapshots = []
+    if not yesterday_available: missing_snapshots.append(os.path.basename(prev_day_path))
+    if not month_available: missing_snapshots.append(os.path.basename(prev_month_path))
+
+    # Build day section (warning if missing)
+    day_title = f'{target_dt.month}月{target_dt.day}日 vs {prev_day_dt.month}月{prev_day_dt.day}日 | PH33劫持数据对比'
+    day_sub = f'数据口径：PH33 当天数据汇总'
+    if yesterday_available:
+        img_day = _build_section_image(day_title, day_sub, cur_data, prev_day_data)
+    else:
+        img_day = _build_warning_section(prev_day_str)
+
+    # Build month section (warning if missing)
+    month_title = f'{target_dt.month}月{target_dt.day}日 vs {prev_month_dt.month}月{prev_month_dt.day}日 | PH33劫持数据对比'
+    month_sub = f'数据口径：PH33 当天数据汇总'
+    if month_available:
+        img_month = _build_section_image(month_title, month_sub, cur_data, prev_month_data)
+    else:
+        img_month = _build_warning_section(prev_month_str)
 
     # Combine vertically
     img_day_pil = Image.open(io.BytesIO(img_day))
@@ -203,10 +225,17 @@ def generate_hijack_comparison(target_date_str):
 
     caption = f'🛡️ PH33 劫持数据对比 — {target_dt.month}月{target_dt.day}日'
     metadata = {
+        'requested_target_date': target_date_str,
+        'resolved_target_date': target_date_str,
+        'source_data_date': target_date_str,
+        'yesterday_date': prev_day_str,
+        'month_date': prev_month_str,
+        'yesterday_available': yesterday_available,
+        'month_available': month_available,
+        'missing_snapshots': missing_snapshots,
         'target_date': target_date_str,
         'prev_day_date': prev_day_str,
         'prev_month_date': prev_month_str,
-        'month_available': month_available,
         'cur_file': cur_path,
         'prev_day_file': prev_day_path,
         'prev_month_file': prev_month_path if month_available else None,

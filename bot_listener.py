@@ -233,17 +233,20 @@ def _send_photo_file(filepath, caption=None):
 
 
 def _send_hijack_comparison(target_date=None, dry_run=False):
-    """Generate and send PH33 comparison combined image.
-    Args: target_date='2026-07-26' or None (uses today).
-    Returns dict with result details."""
+    """Generate PH33 comparison. target_date must be explicit YYYY-MM-DD string."""
     import hijack_comparison_push as hcp
-    from datetime import datetime as _dt
     if target_date is None:
-        target_date = _dt.now().strftime('%Y-%m-%d')
+        return {"success": False, "error": "target_date required", "dry_run": dry_run, "steps": [], "target_date": None}
 
     result = {"success": False, "dry_run": dry_run, "target_date": target_date, "steps": []}
 
     ok, err, img_bytes, caption, meta = hcp.generate_hijack_comparison(target_date)
+
+    # Copy metadata
+    for k in ('requested_target_date','resolved_target_date','source_data_date',
+              'yesterday_date','month_date','yesterday_available','month_available','missing_snapshots'):
+        if meta and k in meta: result[k] = meta[k]
+
     if not ok:
         result["error"] = err
         if not dry_run: send_message(f"PH33对比生成失败: {err}")
@@ -256,7 +259,6 @@ def _send_hijack_comparison(target_date=None, dry_run=False):
     result["steps"].append({
         "order": 2, "type": "hijack_comparison",
         "path": fpath, "size": len(img_bytes),
-        "month_available": meta.get("month_available"),
         "sent": False
     })
 
@@ -307,76 +309,93 @@ def run_hijack_push(mode="data", dry_run=False, target_date=None):
             except Exception:
                 return {"success": False, "error": f"JSON parse failed (exit {r.returncode})", "raw": out[:200]}
 
-        if target_date is None:
-            from datetime import datetime as _dt
-            target_date = _dt.now().strftime('%Y-%m-%d')
-
         base_result = {"success": True, "dry_run": dry_run, "target_date": target_date, "steps": []}
 
-        def _add_step(order, stype, path=None, size=None, sent=False, **extra):
-            step = {"order": order, "type": stype, "sent": sent}
-            if path: step["path"] = path
-            if size: step["size"] = size
+        def _add_step(order, stype, **extra):
+            step = {"order": order, "type": stype, "sent": False}
             step.update(extra)
             base_result["steps"].append(step)
 
         if mode == "hijack":
-            # ── Phase 1: Generate ALL assets first ──
+            # ── Phase 1: Generate summary, resolve date ──
             sum_result = _run_summary_only()
             if not sum_result.get("success"):
                 base_result["success"] = False
                 base_result["error"] = sum_result.get("error", "unknown")
+                base_result["requested_target_date"] = target_date
+                base_result["source_data_date"] = sum_result.get("data_date")
+                base_result["resolved_target_date"] = None
                 return base_result
 
             sd = sum_result.get("summary", {})
             ss_path = sd.get("path", "")
             ss_size = sd.get("size", 0) if sd.get("size") else 0
             xlsx_path = sum_result.get("xlsx", {}).get("path", "")
+            source_data_date = sd.get("data_date")
+            base_result["source_data_date"] = source_data_date
 
-            comp = _send_hijack_comparison(target_date=target_date, dry_run=True)  # Always generate, never send here
-            comp_ok = comp.get("success", False)
-
-            # Verify all assets exist before any send
-            missing = []
-            if not ss_path or not os.path.isfile(ss_path): missing.append("summary")
-            if comp_ok:
-                for cs in comp.get("steps", []):
-                    cp = cs.get("path", "")
-                    if cp and not os.path.isfile(cp): missing.append(cs.get("type", "comparison"))
+            # Resolve target_date: use caller's value, or Excel's data_date
+            if target_date is None:
+                if not source_data_date:
+                    base_result["success"] = False
+                    base_result["error"] = "Cannot resolve target_date: Excel data_date missing"
+                    return base_result
+                resolved_target_date = source_data_date
             else:
-                missing.append("comparison")
-            if not xlsx_path or not os.path.isfile(xlsx_path): missing.append("xlsx")
+                if source_data_date and target_date != source_data_date:
+                    base_result["success"] = False
+                    base_result["error"] = "Target date does not match source data date"
+                    base_result["requested_target_date"] = target_date
+                    base_result["source_data_date"] = source_data_date
+                    return base_result
+                resolved_target_date = target_date
 
-            if missing and not dry_run:
-                base_result["success"] = False
-                base_result["error"] = f"Preflight failed — missing: {', '.join(missing)}"
-                log(f"PH33 push preflight failed: {missing}")
-                return base_result
+            base_result["requested_target_date"] = target_date
+            base_result["resolved_target_date"] = resolved_target_date
+            base_result["target_date"] = resolved_target_date
 
-            # ── Phase 2: All assets ready, send in order ──
-            if not dry_run:
-                _send_photo_file(ss_path)
+            # ── Phase 2: Generate comparison (always, even if snapshots missing) ──
+            comp = _send_hijack_comparison(target_date=resolved_target_date, dry_run=True)
 
+            # ── Phase 3: Always produce 3 steps ──
             _add_step(1, "hijack_summary", path=ss_path, size=ss_size,
-                      source_file=sd.get("source_file"), sent=not dry_run)
+                      source_file=sd.get("source_file"))
 
-            if comp_ok:
-                for cs in comp.get("steps", []):
-                    cp = cs.get("path", "")
-                    if not dry_run and cp and os.path.isfile(cp):
-                        _send_photo_file(cp)
-                    cs["order"] = len(base_result["steps"]) + 1
-                    cs["sent"] = not dry_run
-                    base_result["steps"].append(cs)
+            _add_step(2, "hijack_comparison",
+                      success=comp.get("success", False),
+                      error=comp.get("error"),
+                      missing_snapshots=comp.get("missing_snapshots", []))
+
+            _add_step(3, "xlsx", path=xlsx_path, skipped_in_dry_run=dry_run)
+
+            # ── Phase 4: Preflight & send ──
+            if dry_run:
+                pass  # All sent=False already
             else:
-                base_result["success"] = False
-                base_result["error"] = comp.get("error", "comparison generation failed")
+                # Preflight: summary + xlsx must exist; comparison is optional
+                missing = []
+                if not ss_path or not os.path.isfile(ss_path): missing.append("summary")
+                if not xlsx_path or not os.path.isfile(xlsx_path): missing.append("xlsx")
+                if missing:
+                    base_result["success"] = False
+                    base_result["error"] = f"Preflight failed — missing: {', '.join(missing)}"
+                    log(f"PH33 push preflight failed: {missing}")
+                    return base_result
 
-            if not dry_run and xlsx_path and os.path.isfile(xlsx_path):
+                # Send in order
+                _send_photo_file(ss_path)
+                base_result["steps"][0]["sent"] = True
+
+                if comp.get("success"):
+                    for cs in comp.get("steps", []):
+                        cp = cs.get("path", "")
+                        if cp and os.path.isfile(cp):
+                            _send_photo_file(cp)
+                    base_result["steps"][1]["sent"] = True
+
                 from push_hijack import send_document as _hj_send_doc
                 _hj_send_doc(xlsx_path)
-            _add_step(len(base_result["steps"]) + 1, "xlsx", path=xlsx_path,
-                      sent=not dry_run, skipped_in_dry_run=dry_run)
+                base_result["steps"][2]["sent"] = True
 
             # ── Archive snapshot (only after all 3 sends succeeded, only in non-dry-run) ──
             if dry_run:

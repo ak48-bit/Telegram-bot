@@ -505,8 +505,9 @@ def api_call(method, payload):
         return {"ok": False, "description": str(e)}
 
 
-def send_message(text, reply_markup=None):
-    payload = {"chat_id": CHAT_ID, "text": text}
+def send_message(text, reply_markup=None, target_chat_id=None):
+    destination = target_chat_id if target_chat_id is not None else CHAT_ID
+    payload = {"chat_id": destination, "text": text}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
@@ -1062,8 +1063,39 @@ def main():
                     chat = msg.get("chat", {})
                     text = (msg.get("text") or msg.get("caption") or "").strip()
 
-                    if chat.get("id") != CHAT_ID:
+                    # Admin read-only commands allowed in private chat.
+                    # Business push commands remain group-only.
+                    ADMIN_PRIVATE_COMMANDS = {
+                        "/status", "/状态",
+                        "/data_status", "/数据状态",
+                        "/snapshot_check", "/快照检查",
+                        "/compare_check", "/对比检查",
+                    }
+                    _cmd_raw = text.split()[0].lower().split("@")[0] if text else ""
+                    chat_id = chat.get("id")
+                    chat_type = chat.get("type")
+
+                    is_target_group = (chat_id == CHAT_ID)
+                    is_private_admin_command = (
+                        chat_type == "private"
+                        and _cmd_raw in ADMIN_PRIVATE_COMMANDS
+                    )
+
+                    if not is_target_group and not is_private_admin_command:
                         continue
+
+                    # Replies for private chat go back to the private chat;
+                    # group replies stay in the business group.
+                    reply_chat_id = chat_id if is_private_admin_command else CHAT_ID
+
+                    # Non-admin private command → explicit denial to that private chat
+                    if is_private_admin_command:
+                        sender_id_priv = str(msg.get("from", {}).get("id", ""))
+                        admins_priv = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
+                        if not admins_priv or sender_id_priv not in admins_priv:
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作",
+                                         target_chat_id=reply_chat_id)
+                            continue
 
                     user = msg.get("from", {}).get("first_name", "用户")
 
@@ -1186,60 +1218,66 @@ def main():
 
                     elif cmd in ("/status", "/状态"):
                         if _plat_cfg is None:
-                            send_message("❌ 平台配置模块未加载")
+                            send_message("❌ 平台配置模块未加载", target_chat_id=reply_chat_id)
                             continue
                         sender_id = str(msg.get("from", {}).get("id", ""))
                         admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
                         if not admin_ids:
-                            send_message("❌ 尚未配置 Admin Telegram ID，状态命令已禁用")
+                            send_message("❌ 尚未配置 Admin Telegram ID，状态命令已禁用",
+                                         target_chat_id=reply_chat_id)
                             continue
                         if sender_id not in admin_ids:
-                            send_message("❌ 权限不足，仅 Admin 可执行此操作")
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作",
+                                         target_chat_id=reply_chat_id)
                             continue
                         try:
                             status_text = _plat_cfg.format_bot_status(DATA_FOLDER)
-                            send_message(status_text)
+                            send_message(status_text, target_chat_id=reply_chat_id)
                         except Exception as e:
                             log(f"/status error: {e}")
-                            send_message("❌ 状态获取失败")
+                            send_message("❌ 状态获取失败", target_chat_id=reply_chat_id)
 
                     elif cmd in ("/snapshot_check", "/快照检查"):
                         if _plat_cfg is None:
-                            send_message("❌ 平台配置模块未加载")
+                            send_message("❌ 平台配置模块未加载", target_chat_id=reply_chat_id)
                             continue
                         sender_id = str(msg.get("from", {}).get("id", ""))
                         admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
                         if not admin_ids:
-                            send_message("❌ 尚未配置 Admin Telegram ID，快照检查命令已禁用")
+                            send_message("❌ 尚未配置 Admin Telegram ID，快照检查命令已禁用",
+                                         target_chat_id=reply_chat_id)
                             continue
                         if sender_id not in admin_ids:
-                            send_message("❌ 权限不足，仅 Admin 可执行此操作")
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作",
+                                         target_chat_id=reply_chat_id)
                             continue
                         try:
                             status_text = _plat_cfg.format_snapshot_check(DATA_FOLDER)
-                            send_message(status_text)
+                            send_message(status_text, target_chat_id=reply_chat_id)
                         except Exception as e:
                             log(f"/snapshot_check error: {e}")
-                            send_message("❌ 快照检查失败")
+                            send_message("❌ 快照检查失败", target_chat_id=reply_chat_id)
 
                     elif cmd in ("/data_status", "/数据状态"):
                         if _plat_cfg is None:
-                            send_message("❌ 平台配置模块未加载")
+                            send_message("❌ 平台配置模块未加载", target_chat_id=reply_chat_id)
                             continue
                         sender_id = str(msg.get("from", {}).get("id", ""))
                         admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
                         if not admin_ids:
-                            send_message("❌ 尚未配置 Admin Telegram ID，数据状态命令已禁用")
+                            send_message("❌ 尚未配置 Admin Telegram ID，数据状态命令已禁用",
+                                         target_chat_id=reply_chat_id)
                             continue
                         if sender_id not in admin_ids:
-                            send_message("❌ 权限不足，仅 Admin 可执行此操作")
+                            send_message("❌ 权限不足，仅 Admin 可执行此操作",
+                                         target_chat_id=reply_chat_id)
                             continue
                         try:
                             status_text = _plat_cfg.format_data_status(DATA_FOLDER)
-                            send_message(status_text)
+                            send_message(status_text, target_chat_id=reply_chat_id)
                         except Exception as e:
                             log(f"/data_status error: {e}")
-                            send_message("❌ 数据状态获取失败")
+                            send_message("❌ 数据状态获取失败", target_chat_id=reply_chat_id)
 
                     elif cmd in ("/reload_config", "/重新加载配置"):
                         if _plat_cfg is None:
@@ -1302,16 +1340,18 @@ def main():
                         sender_id = str(msg.get("from", {}).get("id", ""))
                         admin_ids = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
                         if not admin_ids:
-                            send_message("❌ 管理员名单未配置，此功能已禁用"); continue
+                            send_message("❌ 管理员名单未配置，此功能已禁用",
+                                         target_chat_id=reply_chat_id); continue
                         if sender_id not in admin_ids:
-                            send_message("❌ 权限不足，仅管理员可执行"); continue
+                            send_message("❌ 权限不足，仅管理员可执行",
+                                         target_chat_id=reply_chat_id); continue
                         try:
                             import comparison_push as cp
                             status_text = cp.check_comparison_status()
-                            send_message(status_text)
+                            send_message(status_text, target_chat_id=reply_chat_id)
                         except Exception as e:
                             log(f"Compare check error: {e}")
-                            send_message(f"❌ 状态检查失败: {e}")
+                            send_message(f"❌ 状态检查失败: {e}", target_chat_id=reply_chat_id)
 
                     elif cmd in ("/compare", "/数据对比"):
                         sender_id = str(msg.get("from", {}).get("id", ""))

@@ -24,10 +24,10 @@ COPY bot_listener.py _platform_config.py _runtime.py _bot_data.py \
 RUN mkdir -p /data/excel /data/comparison_archive /data/generated /data/backups /data/uploads \
     && chmod -R 777 /data
 
-# Run as non-root
-RUN useradd --create-home --shell /bin/bash botuser \
-    && chown -R botuser:botuser /app /data
-USER botuser
+# Run as non-root (disabled — Railway Volume overrides /data at mount time)
+# RUN useradd --create-home --shell /bin/bash botuser \
+#     && chown -R botuser:botuser /app /data
+# USER botuser
 
 # Start: preflight smoke test if RAILWAY_SMOKE_TEST=1, else polling bot
 CMD ["python", "-u", "bot_listener.py"]

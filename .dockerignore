@@ -1,0 +1,32 @@
+# Secrets — never copy
+.env
+.wfhdp.env
+*.pem
+*.key
+
+# Data — mounted via Volume
+data/
+新建文件夹/
+*.xlsx
+*.png
+
+# VCS / local
+.git
+.gitignore
+__pycache__/
+*.pyc
+
+# Logs
+*.log
+bot_log.txt
+
+# Local tooling not needed in image
+generate_previews.py
+push_hijack.py
+bot_watchdog.ps1
+*.bat
+*.vbs
+bonus_bot*.py
+sync_excel_to_do.ps1
+install_excel_sync_task.ps1
+*.db

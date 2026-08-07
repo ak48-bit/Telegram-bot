@@ -1,0 +1,4 @@
+# WFHDPbot — Windows-only additions
+# Windows Excel COM screenshot (push_hijack.py) requires pywin32.
+-r requirements.txt
+pywin32>=306

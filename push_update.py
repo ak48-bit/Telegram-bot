@@ -3,8 +3,15 @@ from datetime import datetime
 import openpyxl
 from PIL import Image, ImageDraw, ImageFont
 
-FONT_PATH = "C:/Windows/Fonts/msyh.ttc"
-FONT_BOLD_PATH = "C:/Windows/Fonts/msyhbd.ttc"
+# Unified runtime (data dir + fonts) — Windows + Railway
+try:
+    import _runtime as _rt
+    FONT_PATH = _rt.font_path() or "C:/Windows/Fonts/msyh.ttc"
+    FONT_BOLD_PATH = _rt.font_bold_path() or "C:/Windows/Fonts/msyhbd.ttc"
+except ImportError:
+    _rt = None
+    FONT_PATH = "C:/Windows/Fonts/msyh.ttc"
+    FONT_BOLD_PATH = "C:/Windows/Fonts/msyhbd.ttc"
 
 TARGET_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -16,12 +23,15 @@ def load_config():
             return json.load(f)
     return {}
 CONFIG = load_config()
-# DATA_FOLDER: env var → config.json → hardcoded fallback
-_env_df = os.environ.get("DATA_FOLDER", "").strip()
-if _env_df:
-    DATA_FOLDER = _env_df
+# DATA_FOLDER: unified via _runtime (Railway-aware), fallback env→config→Windows
+if _rt:
+    DATA_FOLDER = _rt.excel_dir()
 else:
-    DATA_FOLDER = CONFIG.get("data_folder", r"C:\Users\ak481\OneDrive\Desktop\新建文件夹")
+    _env_df = os.environ.get("DATA_FOLDER", "").strip()
+    if _env_df:
+        DATA_FOLDER = _env_df
+    else:
+        DATA_FOLDER = CONFIG.get("data_folder", r"C:\Users\ak481\OneDrive\Desktop\新建文件夹")
 
 # ── Unified platform config (single source of truth) ──
 import _platform_config as _plat

@@ -13,7 +13,12 @@ PH_PLATFORMS  = _plat.get_platforms_by_region("PH")
 BD_PLATFORMS  = _plat.get_platforms_by_region("BD")
 MM_PLATFORMS  = _plat.get_platforms_by_region("MM")
 
-DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+# Unified data dir via _runtime (Windows + Railway)
+try:
+    import _runtime as _rt
+    DATA_FOLDER = _rt.excel_dir()
+except ImportError:
+    DATA_FOLDER = r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
 
 
 def _find_daily_file():

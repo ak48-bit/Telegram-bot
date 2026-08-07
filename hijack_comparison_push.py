@@ -8,13 +8,18 @@ from datetime import datetime, timedelta
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
+try:
+    import _runtime
+except ImportError:
+    _runtime = None
+
 import openpyxl
 from PIL import Image, ImageDraw, ImageFont
 
-FONT = 'C:/Windows/Fonts/msyh.ttc'
-FONT_BOLD = 'C:/Windows/Fonts/msyhbd.ttc'
-ARCHIVE_DIR = os.path.join(SCRIPT_DIR, 'data', 'comparison_archive')
-OUT_DIR = os.path.join(SCRIPT_DIR, 'data', 'generated')
+FONT = _runtime.font_path() if _runtime else 'C:/Windows/Fonts/msyh.ttc'
+FONT_BOLD = _runtime.font_bold_path() if _runtime else 'C:/Windows/Fonts/msyhbd.ttc'
+ARCHIVE_DIR = _runtime.archive_dir() if _runtime else os.path.join(SCRIPT_DIR, 'data', 'comparison_archive')
+OUT_DIR = _runtime.generated_dir() if _runtime else os.path.join(SCRIPT_DIR, 'data', 'generated')
 os.makedirs(OUT_DIR, exist_ok=True)
 
 HIJACK_FIELDS = [
@@ -154,15 +159,32 @@ def generate_hijack_comparison(target_date_str):
     prev_day_str = prev_day_dt.strftime('%Y-%m-%d')
     prev_month_str = prev_month_dt.strftime('%Y-%m-%d')
 
-    cur_path = os.path.join(ARCHIVE_DIR, f'hijack_{target_date_str}.xlsx')
+    # Current day data: read the LIVE hijack Excel from active_month,
+    # NOT the archive (archive for current day only exists after first push).
+    cur_path = None
+    try:
+        import _platform_config as _pc
+        cur_path, cur_fname, cur_date, cur_errs = _pc.get_active_excel("hijack")
+    except Exception:
+        cur_path = None
+        cur_errs = []
+    if not cur_path:
+        return False, f"无法获取当前劫持Excel: {'; '.join(cur_errs or ['解析失败'])}", None, "", {
+            "requested_target_date": target_date_str,
+            "resolved_target_date": target_date_str,
+            "yesterday_date": prev_day_str,
+            "month_date": prev_month_str,
+            "error": "live hijack excel unavailable",
+        }
+
     prev_day_path = os.path.join(ARCHIVE_DIR, f'hijack_{prev_day_str}.xlsx')
     prev_month_path = os.path.join(ARCHIVE_DIR, f'hijack_{prev_month_str}.xlsx')
 
-    # Read current day (required)
+    # Read current day (required, from live Excel)
     try:
         cur_data = _read_hijack_row(cur_path)
     except Exception as e:
-        return False, f"读取当前日快照失败: {e}", None, "", {
+        return False, f"读取当前劫持Excel失败: {e}", None, "", {
             "requested_target_date": target_date_str,
             "resolved_target_date": target_date_str,
             "yesterday_date": prev_day_str,

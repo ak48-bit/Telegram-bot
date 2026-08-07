@@ -17,6 +17,13 @@
 !install_excel_sync_task.ps1
 !bot_watchdog.ps1
 !hijack_comparison_push.py
+!hijack_summary_renderer.py
+!_runtime.py
+
+# ── Railway deployment ──
+!Dockerfile
+!.dockerignore
+!requirements-windows.txt
 
 # ── V1.1 month config + release doc ──
 !active_month.json

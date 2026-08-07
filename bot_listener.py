@@ -291,8 +291,51 @@ def run_hijack_push(mode="data", dry_run=False, target_date=None):
     if not dry_run and not TOKEN:
         _init_telegram()
     try:
+        def _resolve_renderer():
+            """HIJACK_RENDERER: auto | com | pillow. Returns 'com' or 'pillow'."""
+            import _runtime as _rt
+            choice = os.environ.get("HIJACK_RENDERER", "auto").strip().lower()
+            if choice == "pillow":
+                return "pillow"
+            if choice == "com":
+                return "com"
+            # auto: Windows→com, Linux→pillow
+            return "pillow" if _rt.is_railway() or not _rt.IS_WINDOWS else "com"
+
         def _run_summary_only():
-            """Run push_hijack.py hijack --summary-only --output-json. Returns parsed JSON dict."""
+            """Generate PH33 summary.
+            Windows default: push_hijack.py COM screenshot.
+            Railway/Linux: pure Pillow renderer.
+            Returns unified dict with path/size/data_date."""
+            renderer = _resolve_renderer()
+            import _runtime as _rt
+
+            if renderer == "pillow":
+                # Resolve hijack excel via active_month
+                try:
+                    import _platform_config as _pc
+                    hpath, hfname, hdate, herrs = _pc.get_active_excel("hijack")
+                    if not hpath:
+                        return {"success": False, "error": f"劫持Excel不可用: {'; '.join(herrs)}"}
+                except Exception as e:
+                    return {"success": False, "error": f"劫持Excel解析失败: {str(e)[:60]}"}
+                import hijack_summary_renderer as _hr
+                r = _hr.render_hijack_summary(hpath)
+                if not r.get("success"):
+                    return {"success": False, "error": r.get("error", "pillow renderer failed")}
+                return {
+                    "success": True, "renderer": "pillow",
+                    "summary": {
+                        "path": r["path"], "size": r["size"],
+                        "width": r["width"], "height": r["height"],
+                        "source_file": hpath, "data_date": r.get("data_date"),
+                        "sent": False,
+                    },
+                    "xlsx": {"path": hpath, "sent": False},
+                    "data_date": r.get("data_date"),
+                }
+
+            # COM (Windows)
             cmd = [sys.executable, PUSH_HIJACK_SCRIPT, "hijack",
                    "--summary-only", "--output-json"]
             if dry_run:
@@ -356,12 +399,21 @@ def run_hijack_push(mode="data", dry_run=False, target_date=None):
 
             # ── Phase 2: Generate comparison (always, even if snapshots missing) ──
             comp = _send_hijack_comparison(target_date=resolved_target_date, dry_run=True)
+            comp_path = ""
+            comp_size = 0
+            if comp.get("success"):
+                for cs in comp.get("steps", []):
+                    if cs.get("path"):
+                        comp_path = cs["path"]
+                        comp_size = cs.get("size", 0)
+                        break
 
             # ── Phase 3: Always produce 3 steps ──
             _add_step(1, "hijack_summary", path=ss_path, size=ss_size,
                       source_file=sd.get("source_file"))
 
             _add_step(2, "hijack_comparison",
+                      path=comp_path, size=comp_size,
                       success=comp.get("success", False),
                       error=comp.get("error"),
                       missing_snapshots=comp.get("missing_snapshots", []))
@@ -505,9 +557,14 @@ def api_call(method, payload):
         return {"ok": False, "description": str(e)}
 
 
+def _esc_html(s):
+    """Escape HTML-special characters for Telegram HTML parse mode."""
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def send_message(text, reply_markup=None, target_chat_id=None):
     destination = target_chat_id if target_chat_id is not None else CHAT_ID
-    payload = {"chat_id": destination, "text": text}
+    payload = {"chat_id": destination, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
@@ -584,80 +641,152 @@ def download_telegram_file(file_id, save_path):
     return save_path, None
 
 
-def handle_document(msg):
-    """Process a document sent to the group. Download .xlsx files to data folder."""
+def handle_document(msg, target_chat_id=None):
+    """Process a document uploaded to the group/private chat.
+    Secure upload: admin-only, sanitized name, .xlsx only, openpyxl verify,
+    type + data_date validation, atomic replace, backup, temp staging."""
     doc = msg.get("document", {})
     file_name = doc.get("file_name", "")
     file_id = doc.get("file_id", "")
     file_size = doc.get("file_size", 0)
-    user = msg.get("from", {}).get("first_name", "用户")
+    sender_id = str(msg.get("from", {}).get("id", ""))
 
     if not file_name or not file_id:
         return
 
-    # Only accept Excel files
-    if not file_name.lower().endswith(('.xlsx', '.xls')):
-        send_message(f"⚠️ {user}，我只接受 .xlsx Excel 文件，收到的是: {file_name}")
+    # ── Admin-only upload ──
+    try:
+        admin_ids = [str(a) for a in _plat_cfg.get_admin_ids()]
+    except Exception:
+        admin_ids = []
+    if not admin_ids or sender_id not in admin_ids:
+        send_message("❌ 上传仅允许管理员执行", target_chat_id=target_chat_id)
+        return
+
+    # ── Sanitize filename ──
+    file_name = os.path.basename(file_name.replace("\\", "/"))
+    if not file_name or file_name in (".", "..") or ".." in file_name:
+        send_message("⚠️ 无效文件名，已拒绝", target_chat_id=target_chat_id)
+        return
+
+    # ── .xlsx only (reject .xls) ──
+    if not file_name.lower().endswith('.xlsx'):
+        send_message("⚠️ 仅接受 .xlsx 文件（拒绝 .xls）", target_chat_id=target_chat_id)
         return
 
     size_mb = file_size / (1024 * 1024)
-    log(f"Document from {user}: {file_name} ({size_mb:.1f} MB)")
-
+    log(f"Document from {sender_id}: {file_name} ({size_mb:.1f} MB)")
     if size_mb > 20:
-        send_message(f"⚠️ 文件 {file_name} 太大 ({size_mb:.1f}MB)，请控制在 20MB 以内")
+        send_message("⚠️ 文件超过 20MB，已拒绝", target_chat_id=target_chat_id)
         return
 
-    save_path = os.path.join(DATA_FOLDER, file_name)
-    is_overwrite = os.path.exists(save_path)
+    # ── Resolve final target + temp staging ──
+    try:
+        import _runtime as _rt
+        uploads_dir = os.path.join(_rt.resolve_data_root(), "uploads")
+        excel_final_dir = _rt.excel_dir()
+        backups_final = _rt.backups_dir()
+    except Exception:
+        uploads_dir = os.path.join(DATA_FOLDER, "uploads")
+        excel_final_dir = DATA_FOLDER
+        backups_final = BACKUP_DIR
 
+    os.makedirs(uploads_dir, exist_ok=True)
+    os.makedirs(excel_final_dir, exist_ok=True)
+    os.makedirs(backups_final, exist_ok=True)
+
+    tmp_path = os.path.join(uploads_dir, f".upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file_name}")
+    final_path = os.path.join(excel_final_dir, file_name)
+
+    # ── Download to temp ──
+    send_message(f"📥 正在接收 {_esc_html(file_name)} ...", target_chat_id=target_chat_id)
+    saved, err = download_telegram_file(file_id, tmp_path)
+    if err or not saved or not os.path.isfile(tmp_path):
+        log(f"Upload download failed: {err}")
+        send_message("❌ 下载失败，已清理临时文件", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
+        return
+
+    # ── openpyxl verify ──
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(tmp_path, data_only=True)
+        wb.close()
+    except Exception as e:
+        log(f"Upload invalid xlsx: {e}")
+        send_message("❌ 文件不是有效的 xlsx，已拒绝", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
+        return
+
+    # ── Detect type: development vs hijack ──
+    is_dev = '线上办公数据汇总' in file_name and '劫持' not in file_name
+    is_hij = '劫持' in file_name and '办公数据汇总' in file_name
+    if is_dev and is_hij:
+        is_dev, is_hij = False, False
+    if not (is_dev or is_hij):
+        log(f"Upload type unknown: {file_name}")
+        send_message("⚠️ 无法识别文件类型（development/hijack），已拒绝", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
+        return
+
+    # ── data_date validation ──
+    try:
+        import _platform_config as _pc
+        data_date = _pc._detect_data_date(tmp_path)
+    except Exception:
+        data_date = None
+    if not data_date:
+        log(f"Upload data_date unidentifiable: {file_name}")
+        send_message("⚠️ 无法识别内部 data_date，已拒绝", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
+        return
+
+    # ── Verify filename matches type ──
+    if is_dev and '劫持' in file_name:
+        send_message("❌ 文件名含「劫持」但判定为开发，已拒绝", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
+        return
+    if is_hij and '劫持' not in file_name:
+        send_message("❌ 劫持文件必须包含「劫持」字样，已拒绝", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
+        return
+
+    # ── Backup existing formal file (FAIL-CLOSED: block replace if backup fails) ──
+    is_overwrite = os.path.exists(final_path)
     if is_overwrite:
-        # Backup old file before overwriting
         try:
-            os.makedirs(BACKUP_DIR, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_name = f"{ts}_{file_name}"
-            # Clean up old backups (>7 days)
-            for old_backup in sorted(os.listdir(BACKUP_DIR)):
-                if old_backup.endswith('.xlsx'):
-                    try:
-                        old_date = old_backup[:8]  # YYYYMMDD
-                        if len(old_date) == 8 and (datetime.now() - datetime.strptime(old_date, "%Y%m%d")).days > 7:
-                            os.remove(os.path.join(BACKUP_DIR, old_backup))
-                            log(f"Cleaned old backup: {old_backup}")
-                    except Exception:
-                        pass
-            shutil.copy2(save_path, os.path.join(BACKUP_DIR, backup_name))
-            log(f"Backed up to: {backup_name}")
+            shutil.copy2(final_path, os.path.join(backups_final, f"{ts}_{file_name}"))
+            log(f"Upload backup: {ts}_{file_name}")
         except Exception as e:
-            log(f"Backup error: {e}")
-        send_message(f"⚠️ 文件 {file_name} 已存在，正在覆盖...")
+            log(f"Upload backup FAILED, abort replace: {e}")
+            send_message("❌ 备份失败，正式文件未改动（Fail-Closed）",
+                         target_chat_id=target_chat_id)
+            _safe_remove(tmp_path)
+            return
 
-    send_message(f"📥 正在接收 {user} 上传的 {file_name} ...")
-
-    saved, err = download_telegram_file(file_id, save_path)
-
-    if err:
-        log(f"Download failed: {err}")
-        send_message(f"❌ 下载失败: {err}")
+    # ── Atomic replace ──
+    try:
+        os.replace(tmp_path, final_path)
+    except Exception as e:
+        log(f"Upload os.replace failed: {e}")
+        send_message("❌ 文件替换失败，正式文件未改动", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
         return
 
-    log(f"Saved: {save_path}")
-    overwrite_note = " (已覆盖旧文件)" if is_overwrite else ""
+    log(f"Upload saved: {final_path} data_date={data_date} type={'dev' if is_dev else 'hij'}")
+    send_message(f"✅ 已接收并保存: {_esc_html(file_name)}\n"
+                 f"类型: {'开发' if is_dev else '劫持'}\n"
+                 f"data_date: <code>{data_date}</code>",
+                 target_chat_id=target_chat_id)
 
-    # Auto-detect: if this is a main data file, auto-trigger push
-    # Normalize brackets/spacing for matching
-    _fn = file_name.replace("（", " ").replace("）", " ").replace("(", " ").replace(")", " ")
-    auto_push = any(kw in _fn for kw in ['线上办公数据汇总', '线上人事数据汇总'])
 
-    send_message(f"✅ 已接收并保存: {file_name}{overwrite_note}\n"
-                 f"文件大小: {size_mb:.1f} MB\n"
-                 f"存放位置: 新建文件夹\\{file_name}")
-
-    if auto_push:
-        log(f"Auto-push triggered after upload: {file_name}")
-        send_message(f"⚡ 检测到数据文件更新，自动推送中...")
-        output = run_push()
-        log(f"Auto-push done: {output[:200]}")
+def _safe_remove(path):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
 
 
 def parse_date(text):
@@ -759,7 +888,7 @@ def handle_set(args_text):
     """Handle /set command: /set key value"""
     parts = args_text.strip().split(None, 1)
     if len(parts) < 2:
-        send_message("用法: /set <key> <value>\n如: /set daily_push_time 21:30\n"
+        send_message("用法: /set &lt;key&gt; &lt;value&gt;\n如: /set daily_push_time 21:30\n"
                      "可设置项:\n"
                      "  daily_push_time (如 21:30)\n"
                      "  title_daily (标题文本)\n"
@@ -772,7 +901,14 @@ def handle_set(args_text):
 
     if key == "daily_push_time":
         cfg["schedule"]["daily_push_time"] = value
-        # Also update Windows scheduled task
+        # Also update Windows scheduled task (skip on Railway/Linux)
+        try:
+            import _runtime
+            if _runtime.is_railway():
+                send_message("Railway环境不支持Windows计划任务，请使用Railway Cron或Bot内部调度配置")
+                return
+        except ImportError:
+            pass
         import subprocess
         bat = r'C:\Users\ak481\OneDrive\Desktop\ak 线上办公部门skills建议和调用\_daily_push.bat'
         ps_cmd = f'schtasks /create /tn "线上办公数据推送" /tr "{bat}" /sc daily /st {value} /f'
@@ -1081,15 +1217,26 @@ def main():
                         and _cmd_raw in ADMIN_PRIVATE_COMMANDS
                     )
 
-                    if not is_target_group and not is_private_admin_command:
+                    # Setup mode: allow admin private-chat / target-group document upload
+                    try:
+                        import _runtime as _rt
+                        _in_setup = _rt.is_setup_mode()
+                    except Exception:
+                        _in_setup = False
+                    is_private_document = (chat_type == "private" and "document" in msg)
+                    is_setup_admin_upload = (
+                        _in_setup and (is_private_document or is_target_group)
+                    )
+
+                    if not is_target_group and not is_private_admin_command and not is_setup_admin_upload:
                         continue
 
                     # Replies for private chat go back to the private chat;
                     # group replies stay in the business group.
-                    reply_chat_id = chat_id if is_private_admin_command else CHAT_ID
+                    reply_chat_id = chat_id if (is_private_admin_command or is_private_document) else CHAT_ID
 
                     # Non-admin private command → explicit denial to that private chat
-                    if is_private_admin_command:
+                    if is_private_admin_command or is_private_document:
                         sender_id_priv = str(msg.get("from", {}).get("id", ""))
                         admins_priv = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
                         if not admins_priv or sender_id_priv not in admins_priv:
@@ -1101,13 +1248,34 @@ def main():
 
                     # ── Document upload (Excel files) ──
                     if "document" in msg:
-                        handle_document(msg)
+                        handle_document(msg, target_chat_id=reply_chat_id)
                         continue
 
                     if not text:
                         continue
 
                     cmd = text.split()[0].lower().split("@")[0]
+
+                    # ── Setup mode: block all business push/compare commands ──
+                    try:
+                        import _runtime as _rt
+                        _in_setup = _rt.is_setup_mode()
+                    except Exception:
+                        _in_setup = False
+                    _SETUP_BLOCKED = {
+                        "/push", "/推送", "/daily", "/monthly", "/hijack",
+                        "/push2", "/数据截图", "/push3", "/劫持办公",
+                        "/push4", "/劫持人事", "/compare", "/数据对比",
+                        "/compare_date", "/指定对比",
+                    }
+                    if _in_setup and cmd in _SETUP_BLOCKED:
+                        send_message("🛠 <b>SETUP MODE</b>\n\n"
+                                     "当前为 Railway 初始化模式。\n"
+                                     "仅允许管理员上传 Excel 文件。\n"
+                                     "请先上传开发与劫持 Excel，再用 /data_status 验证，"
+                                     "完成后将 RAILWAY_SETUP_MODE 改为 0 并 redeploy。",
+                                     target_chat_id=reply_chat_id)
+                        continue
 
                     # ── Date / Month-specific push: keywords + date/month ──
                     cfg = load_config()
@@ -1390,33 +1558,36 @@ def main():
                             send_message(f"❌ 数据对比推送失败: {e}")
 
                     elif cmd == "/help":
-                        send_message("📋 可用指令：\n\n"
-                                     "📊 推送数据:\n"
-                                     "  /push — 推送1(文本)\n"
-                                     "  /push2 — 推送2(数据截图+Excel)\n"
-                                     "  /push3 — 推送3(劫持办公)\n"
-                                     "  /push4 — 推送4(劫持人事)\n"
-                                     "  /hijack — 推送2+3+4全部\n"
-                                     "  推送 — 自动推送全部\n"
-                                     "  推送 5月6日 — 指定日期\n"
-                                     "  整个4月 — 整月汇总\n"
-                                     "  查4月 — 查询历史\n"
-                                     "  今天的数据 — 今日数据\n"
-                                     "  本月的汇总 — 本月汇总\n"
-                                     "  /files — 查看已有数据文件\n"
-                                     "  排名 — 站点排行榜\n"
-                                     "  排名roi — 按ROI排\n"
-                                     "  /en — 英文版推送\n"
-                                     "  /platforms — 查看平台配置\n\n"
-                                     "📤 上传文件:\n"
-                                     "  直接拖 .xlsx 文件到群组\n"
-                                     "  Bot 自动下载保存\n\n"
-                                     "⚙️ 修改配置:\n"
-                                     "  /menu — 按钮菜单\n"
-                                     "  /config — 查看配置\n"
-                                     "  /set daily_push_time 21:30\n"
-                                     "  /set title_daily 新标题\n"
-                                     "  /toggle daily_table — 开关模块")
+                        send_message("📚 <b>WFHDPbot 使用说明</b>\n"
+                                     "━━━━━━━━━━━━━━━━\n\n"
+                                     "📊 <b>数据推送</b>\n"
+                                     "├ /push — 推送1(文本)\n"
+                                     "├ /push2 — 推送2(数据截图+Excel)\n"
+                                     "├ /push3 — 推送3(劫持办公)\n"
+                                     "├ /push4 — 推送4(劫持人事)\n"
+                                     "├ /hijack — 推送2+3+4全部\n"
+                                     "├ /compare — 数据对比\n"
+                                     "├ /compare_date &lt;日期&gt; — 指定日期对比\n"
+                                     "└ 推送 / 推送5月6日 / 整个4月\n\n"
+                                     "🛠 <b>状态查询</b>\n"
+                                     "├ /status — Bot 状态\n"
+                                     "├ /data_status — 数据状态\n"
+                                     "├ /snapshot_check — 快照检查\n"
+                                     "├ /compare_check — 对比可用性\n"
+                                     "├ /platforms — 平台配置\n"
+                                     "└ /files — 数据文件列表\n\n"
+                                     "🏆 <b>排行查询</b>\n"
+                                     "├ 排名 — 站点排行榜\n"
+                                     "└ 排名roi / 排名充提差\n\n"
+                                     "📤 <b>上传文件</b>\n"
+                                     "└ 直接拖 .xlsx 文件到群组，Bot 自动下载保存\n\n"
+                                     "⚙️ <b>管理配置</b>\n"
+                                     "├ /menu — 按钮菜单\n"
+                                     "├ /config — 查看配置\n"
+                                     "├ /set daily_push_time 21:30\n"
+                                     "├ /toggle daily_table — 开关模块\n"
+                                     "├ /reload_config — 重载配置(Admin)\n"
+                                     "└ /en — 英文版推送")
 
                     elif cmd == "/start":
                         send_message("已就绪。发送 /menu 打开菜单，或直接说：\n• 推送 — 推送最新数据\n• 推送 5月6日 — 推送指定日期\n• 查4月 — 查询历史数据\n• 排名 — 站点排行榜\n• /en — English push\n• 上传 .xlsx 文件 — 自动推送")
@@ -1498,4 +1669,13 @@ def main():
 
 
 if __name__ == "__main__":
+    import os as _os
+    # Railway smoke test mode: run preflight only, no polling, no Telegram
+    if _os.environ.get("RAILWAY_SMOKE_TEST", "").strip() == "1":
+        try:
+            import _runtime
+            sys.exit(_runtime.run_smoke_test())
+        except ImportError:
+            print("[ERROR] _runtime not importable")
+            sys.exit(1)
     main()

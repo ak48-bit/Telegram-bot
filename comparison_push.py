@@ -9,6 +9,11 @@ from datetime import datetime, timedelta
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
+try:
+    import _runtime
+except ImportError:
+    _runtime = None
+
 from PIL import Image, ImageDraw, ImageFont
 import openpyxl
 
@@ -16,13 +21,13 @@ with open(os.path.join(SCRIPT_DIR, "config.json"), "r", encoding="utf-8") as f:
     CFG = json.load(f)
 
 DATA_FOLDER = CFG.get("data_folder", SCRIPT_DIR)
-ARCHIVE_DIR = os.path.join(SCRIPT_DIR, "data", "comparison_archive")
-GEN_DIR = os.path.join(SCRIPT_DIR, "data", "generated")
+ARCHIVE_DIR = _runtime.archive_dir() if _runtime else os.path.join(SCRIPT_DIR, "data", "comparison_archive")
+GEN_DIR = _runtime.generated_dir() if _runtime else os.path.join(SCRIPT_DIR, "data", "generated")
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
 os.makedirs(GEN_DIR, exist_ok=True)
 
-FONT_PATH = "C:/Windows/Fonts/msyh.ttc"
-FONT_BOLD_PATH = "C:/Windows/Fonts/msyhbd.ttc"
+FONT_PATH = _runtime.font_path() if _runtime else "C:/Windows/Fonts/msyh.ttc"
+FONT_BOLD_PATH = _runtime.font_bold_path() if _runtime else "C:/Windows/Fonts/msyhbd.ttc"
 
 NEW_MAP = {"现场人数": 4, "转线上人数": 5, "线上人数": 6, "人均开发": 7,
            "总注册": 8, "总开发人数": 9, "首存金额": 10,

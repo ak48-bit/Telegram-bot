@@ -18,6 +18,11 @@ import os
 import json
 from datetime import datetime
 
+try:
+    import _runtime
+except ImportError:
+    _runtime = None
+
 # ══════════════════════════════════════════════════════════════════════
 #  Constants
 # ══════════════════════════════════════════════════════════════════════
@@ -220,21 +225,47 @@ def get_monthly_rows(region=None):
 # ══════════════════════════════════════════════════════════════════════
 
 # active_month.json — unified month data source
+# Priority: Railway env vars → /data/active_month.json → git active_month.json
 ACTIVE_MONTH_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "active_month.json"
 )
 
 
+def _resolve_active_month_path():
+    """Find active_month.json. Priority: /data/active_month.json → git root."""
+    try:
+        import _runtime
+        data_root = _runtime.resolve_data_root()
+        data_path = os.path.join(data_root, "active_month.json")
+        if os.path.isfile(data_path):
+            return data_path
+    except Exception:
+        pass
+    return ACTIVE_MONTH_FILE
+
+
 def _load_active_month():
-    """Read active_month.json.
+    """Read active_month config.
+    Priority: env vars → /data/active_month.json → git active_month.json.
     Returns (dict, None) on success.
-    Returns (None, error_msg) if file exists but is malformed.
-    Returns (None, None) if file does not exist (V1.0 compatibility → fallback)."""
-    if not os.path.isfile(ACTIVE_MONTH_FILE):
+    Returns (None, error_msg) if a config file exists but is malformed.
+    Returns (None, None) if no config (V1.0 compatibility → fallback)."""
+    # 1. Railway env vars — MUST be configured in pairs, else fail
+    env_dev = os.environ.get("ACTIVE_DEVELOPMENT_FILE", "").strip()
+    env_hij = os.environ.get("ACTIVE_HIJACK_FILE", "").strip()
+    if env_dev or env_hij:
+        if not env_dev or not env_hij:
+            missing = "hijack" if not env_hij else "development"
+            return None, (f"ACTIVE_*_FILE 环境变量必须成对配置，缺少 {missing}")
+        return {"development": env_dev, "hijack": env_hij}, None
+
+    # 2. /data/active_month.json then git active_month.json
+    path = _resolve_active_month_path()
+    if not os.path.isfile(path):
         return None, None
     try:
-        with open(ACTIVE_MONTH_FILE, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return data, None
     except json.JSONDecodeError as e:
@@ -244,7 +275,13 @@ def _load_active_month():
 
 
 def _resolve_data_folder():
-    """Resolve DATA_FOLDER: env var → config.json → default."""
+    """Resolve DATA_FOLDER: env var → config.json → platform default.
+    Delegates to _runtime for Railway/Linux handling."""
+    try:
+        import _runtime
+        return _runtime.excel_dir()
+    except ImportError:
+        pass
     env_val = os.environ.get("DATA_FOLDER", "").strip()
     if env_val:
         return env_val
@@ -1025,36 +1062,54 @@ def format_bot_status(data_folder=None):
     v, u, _ = get_config_version()
     v_str = str(v) if v is not None else "N/A"
 
-    lines.append("Bot 进程: 运行中（当前命令由 Bot 进程响应）")
-    lines.append(f"Commit: {git_commit}")
-    lines.append(f"分支: {git_branch}")
-    lines.append(f"Python: {py_ver}")
-    lines.append(f"PID: {pid}")
-    lines.append(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"配置版本: {v_str}")
+    lines.append("━━━━━━━━━━━━━━━━")
+    lines.append("🟢 <b>运行状态</b>")
+    lines.append(f"├ 进程: <b>运行中</b>（当前命令由 Bot 进程响应）")
+    lines.append(f"├ PID: <code>{pid}</code>")
+    lines.append(f"├ Python: <code>{py_ver}</code>")
+    lines.append(f"└ 时间: <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>")
+    lines.append("")
+    lines.append("🛠 <b>版本</b>")
+    lines.append(f"├ Commit: <code>{git_commit}</code>")
+    lines.append(f"├ 分支: <code>{git_branch}</code>")
+    lines.append(f"└ 配置版本: <code>{v_str}</code>")
 
     # Platform lists
     dev = get_development_platforms()
     hij = get_hijack_platforms()
     dis = get_disabled_platforms()
     lines.append("")
-    lines.append(f"开发站点 ({len(dev)}): {', '.join(dev)}")
-    lines.append(f"劫持站点 ({len(hij)}): {', '.join(hij)}")
-    lines.append(f"停用站点 ({len(dis)}): {', '.join(dis)}")
+    lines.append("🏷 <b>站点范围</b>")
+    lines.append(f"├ 开发 ({len(dev)}): {', '.join(dev)}")
+    lines.append(f"├ 劫持 ({len(hij)}): {', '.join(hij)}")
+    lines.append(f"└ 停用 ({len(dis)}): {', '.join(dis)}")
 
-    # Instance count — safe read-only check on Windows
-    instance_count = "未检查"
+    # Instance count + runtime env — cross-platform
     try:
-        import subprocess as _sp
-        r = _sp.run(
-            ['powershell', '-NoProfile', '-Command',
-             "(Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'python3.13.exe' -and $_.CommandLine -like '*bot_listener*' }).Count"],
-            capture_output=True, text=True, timeout=10)
-        if r.returncode == 0 and r.stdout.strip().isdigit():
-            instance_count = r.stdout.strip()
+        import _runtime as _rt
+        instance_count = _rt.instance_count()
+        runtime_env = _rt.runtime_label()
     except Exception:
-        pass
-    lines.append(f"bot_listener 实例数: {instance_count}")
+        instance_count = "未检查"
+        runtime_env = "未知"
+
+    # Setup mode indicator
+    setup_mode = False
+    try:
+        import _runtime as _rt
+        setup_mode = _rt.is_setup_mode()
+    except Exception:
+        setup_mode = False
+
+    lines.append("")
+    lines.append("🌐 <b>环境</b>")
+    lines.append(f"├ 运行环境: <code>{runtime_env}</code>")
+    lines.append(f"├ bot_listener 实例数: <code>{instance_count}</code>")
+    lines.append(f"└ 模式: <code>{'SETUP MODE' if setup_mode else '正式'}</code>")
+
+    if setup_mode:
+        lines.append("")
+        lines.append("⚠️ <b>SETUP MODE</b> — 仅允许上传 Excel，业务推送已禁用")
 
     return "\n".join(lines)
 
@@ -1068,21 +1123,25 @@ def format_data_status(data_folder=None):
     if data_folder is None:
         data_folder = _resolve_data_folder()
 
+    def _ok_icon(cond):
+        return "✅" if cond else "❌"
+
     # Development
     dev_info = get_active_excel_verbose("development")
-    lines.append("【开发】")
+    lines.append("━━━━━━━━━━━━━━━━")
+    lines.append("📁 <b>开发数据</b>")
     if dev_info.get("success"):
-        lines.append(f"文件: {dev_info['fname']}")
-        lines.append(f"data_date: {dev_info.get('data_date', 'N/A')}")
-        lines.append(f"存在: {'是' if dev_info.get('size', 0) > 0 else '否'}")
+        lines.append(f"├ 文件: <code>{dev_info['fname']}</code>")
+        lines.append(f"├ data_date: <code>{dev_info.get('data_date', 'N/A')}</code>")
+        lines.append(f"└ 存在: {_ok_icon(dev_info.get('size', 0) > 0)}")
         dev_date = dev_info.get("data_date")
     else:
-        lines.append(f"错误: {dev_info.get('errors', [])}")
+        lines.append(f"└ 错误: {dev_info.get('errors', [])}")
         dev_date = None
 
     # Latest dev snapshot — only standard names, sorted by parsed date
     import re as _re_snap
-    archive_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'comparison_archive')
+    archive_dir = _runtime.archive_dir() if _runtime else os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'comparison_archive')
     dev_snaps = []
     if os.path.isdir(archive_dir):
         for f in os.listdir(archive_dir):
@@ -1091,19 +1150,20 @@ def format_data_status(data_folder=None):
                 dev_snaps.append((m.group(1), f))
     dev_snaps.sort(key=lambda x: x[0])
     latest_dev_snap = dev_snaps[-1][1] if dev_snaps else "(无)"
-    lines.append(f"最新 development 快照: {latest_dev_snap}")
+    lines.append(f"├ 最新快照: <code>{latest_dev_snap}</code>")
     lines.append("")
 
     # Hijack
     hij_info = get_active_excel_verbose("hijack")
-    lines.append("【劫持】")
+    lines.append("━━━━━━━━━━━━━━━━")
+    lines.append("📁 <b>劫持数据</b>")
     if hij_info.get("success"):
-        lines.append(f"文件: {hij_info['fname']}")
-        lines.append(f"data_date: {hij_info.get('data_date', 'N/A')}")
-        lines.append(f"存在: {'是' if hij_info.get('size', 0) > 0 else '否'}")
+        lines.append(f"├ 文件: <code>{hij_info['fname']}</code>")
+        lines.append(f"├ data_date: <code>{hij_info.get('data_date', 'N/A')}</code>")
+        lines.append(f"└ 存在: {_ok_icon(hij_info.get('size', 0) > 0)}")
         hij_date = hij_info.get("data_date")
     else:
-        lines.append(f"错误: {hij_info.get('errors', [])}")
+        lines.append(f"└ 错误: {hij_info.get('errors', [])}")
         hij_date = None
 
     hij_snaps = []
@@ -1114,24 +1174,26 @@ def format_data_status(data_folder=None):
                 hij_snaps.append((m.group(1), f))
     hij_snaps.sort(key=lambda x: x[0])
     latest_hij_snap = hij_snaps[-1][1] if hij_snaps else "(无)"
-    lines.append(f"最新 hijack 快照: {latest_hij_snap}")
+    lines.append(f"└ 最新快照: <code>{latest_hij_snap}</code>")
     lines.append("")
 
     # Yesterday / last-month snapshots + compare feasibility
     def _snap_exists(kind, date_str):
         return os.path.isfile(os.path.join(archive_dir, f"{kind}_{date_str}.xlsx"))
 
-    lines.append("【对比可用性】")
+    lines.append("━━━━━━━━━━━━━━━━")
+    lines.append("📈 <b>对比可用性</b>")
     if dev_date:
         try:
             dt = datetime.strptime(dev_date, '%Y-%m-%d')
             y = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
             m = (dt.replace(month=dt.month - 1) if dt.month > 1
                  else dt.replace(year=dt.year - 1, month=12)).strftime('%Y-%m-%d')
-            lines.append(f"昨日快照 {y}: {'存在' if _snap_exists('development', y) else '缺失'}")
-            lines.append(f"上月同日 {m}: {'存在' if _snap_exists('development', m) else '缺失'}")
-            dev_ok = _snap_exists('development', y) and _snap_exists('development', m)
-            lines.append(f"开发对比图: {'可以生成' if dev_ok else '部分/无法生成（缺失快照显示警告）'}")
+            dev_y = _snap_exists('development', y)
+            dev_m = _snap_exists('development', m)
+            lines.append(f"├ 开发昨日 {y}: {_ok_icon(dev_y)}")
+            lines.append(f"├ 开发上月 {m}: {_ok_icon(dev_m)}")
+            lines.append(f"└ 开发对比图: {'可以生成' if dev_y and dev_m else '部分/无法生成（缺失显示警告）'}")
         except Exception:
             pass
 
@@ -1141,8 +1203,8 @@ def format_data_status(data_folder=None):
             y = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
             m = (dt.replace(month=dt.month - 1) if dt.month > 1
                  else dt.replace(year=dt.year - 1, month=12)).strftime('%Y-%m-%d')
-            lines.append(f"劫持昨日快照 {y}: {'存在' if _snap_exists('hijack', y) else '缺失'}")
-            lines.append(f"劫持上月同日 {m}: {'存在' if _snap_exists('hijack', m) else '缺失'}")
+            lines.append(f"├ 劫持昨日 {y}: {_ok_icon(_snap_exists('hijack', y))}")
+            lines.append(f"└ 劫持上月 {m}: {_ok_icon(_snap_exists('hijack', m))}")
         except Exception:
             pass
 
@@ -1152,16 +1214,16 @@ def format_data_status(data_folder=None):
 def _snapshot_detail(kind, date_str):
     """Check a single snapshot file: exists, size, opens, internal date match.
     Returns a formatted line."""
-    archive_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'comparison_archive')
+    archive_dir = _runtime.archive_dir() if _runtime else os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'comparison_archive')
     fname = f"{kind}_{date_str}.xlsx"
     path = os.path.join(archive_dir, fname)
 
     if not os.path.isfile(path):
-        return f"  ❌ {fname} — 不存在"
+        return f"  ❌ <code>{fname}</code> — 不存在"
 
     size = os.path.getsize(path)
     if size == 0:
-        return f"  ⚠️ {fname} — 存在但 0 字节"
+        return f"  ⚠️ <code>{fname}</code> — 存在但 0 字节"
 
     # Try open
     try:
@@ -1169,13 +1231,13 @@ def _snapshot_detail(kind, date_str):
         wb = openpyxl.load_workbook(path, data_only=True)
         wb.close()
     except Exception as e:
-        return f"  ⚠️ {fname} — 存在 {size:,}B 但无法打开 ({str(e)[:40]})"
+        return f"  ⚠️ <code>{fname}</code> — 存在 {size:,}B 但无法打开 ({str(e)[:40]})"
 
     # Internal date
     internal = _detect_data_date(path)
     date_match = "匹配" if internal == date_str else (f"不匹配({internal})" if internal else "无法识别")
     ok_mark = "✅" if internal == date_str else "⚠️"
-    return f"  {ok_mark} {fname} — {size:,}B 可打开 内部日期:{date_match}"
+    return f"  {ok_mark} <code>{fname}</code> — {size:,}B · 可打开 · 内部日期:{date_match}"
 
 
 def format_snapshot_check(data_folder=None):
@@ -1195,33 +1257,35 @@ def format_snapshot_check(data_folder=None):
         return y, m
 
     # Development
-    lines.append("【开发】")
+    lines.append("━━━━━━━━━━━━━━━━")
+    lines.append("📁 <b>开发快照</b>")
     if dev_info.get("success"):
         dev_date = dev_info.get("data_date")
-        lines.append(f"当前 data_date: {dev_date}")
+        lines.append(f"├ 当前 data_date: <code>{dev_date}</code>")
         if dev_date:
             y, m = _targets(dev_date)
-            lines.append(f"昨日目标: {y}")
+            lines.append(f"├ 昨日目标 <code>{y}</code>:")
             lines.append(_snapshot_detail("development", y))
-            lines.append(f"上月同日目标: {m}")
+            lines.append(f"└ 上月目标 <code>{m}</code>:")
             lines.append(_snapshot_detail("development", m))
     else:
-        lines.append(f"❌ {dev_info.get('errors', [])}")
+        lines.append(f"└ ❌ {dev_info.get('errors', [])}")
     lines.append("")
 
     # Hijack
-    lines.append("【劫持】")
+    lines.append("━━━━━━━━━━━━━━━━")
+    lines.append("📁 <b>劫持快照</b>")
     if hij_info.get("success"):
         hij_date = hij_info.get("data_date")
-        lines.append(f"当前 data_date: {hij_date}")
+        lines.append(f"├ 当前 data_date: <code>{hij_date}</code>")
         if hij_date:
             y, m = _targets(hij_date)
-            lines.append(f"昨日目标: {y}")
+            lines.append(f"├ 昨日目标 <code>{y}</code>:")
             lines.append(_snapshot_detail("hijack", y))
-            lines.append(f"上月同日目标: {m}")
+            lines.append(f"└ 上月目标 <code>{m}</code>:")
             lines.append(_snapshot_detail("hijack", m))
     else:
-        lines.append(f"❌ {hij_info.get('errors', [])}")
+        lines.append(f"└ ❌ {hij_info.get('errors', [])}")
     lines.append("")
 
     return "\n".join(lines)

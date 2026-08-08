@@ -593,7 +593,7 @@ def run_push(date=None, month=None, sections=None):
             cmd.append(f"--sections={sections}")
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=120,
-            cwd=r"C:\Users\ak481\OneDrive\Desktop\ak 线上办公部门skills建议和调用"
+            cwd=SCRIPT_DIR
         )
         return result.stdout.strip()
     except Exception as e:
@@ -616,7 +616,11 @@ def _resolve_data_folder():
                 return cfg_val
     except Exception:
         pass
-    return r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
+    try:
+        import _runtime as _rt_d
+        return _rt_d.excel_dir()
+    except ImportError:
+        return r"C:\Users\ak481\OneDrive\Desktop\新建文件夹"
 
 DATA_FOLDER = _resolve_data_folder()
 BACKUP_DIR = os.path.join(DATA_FOLDER, "备份")
@@ -859,7 +863,7 @@ def parse_query(text):
     return None
 
 
-CONFIG_FILE = r"C:\Users\ak481\OneDrive\Desktop\ak 线上办公部门skills建议和调用\config.json"
+CONFIG_FILE = os.path.join(SCRIPT_DIR, "config.json")
 
 
 def load_config():

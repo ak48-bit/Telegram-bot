@@ -678,6 +678,14 @@ def handle_document(msg, target_chat_id=None):
         send_message("⚠️ 仅接受 .xlsx 文件（拒绝 .xls）", target_chat_id=target_chat_id)
         return
 
+    # ── Archive import detection (SETUP_MODE only, strict filename pattern) ──
+    _archive_m = re.match(r'^(development|hijack)_(\d{4}-\d{2}-\d{2})\.xlsx$', file_name)
+    if _archive_m:
+        _handle_archive_import(file_name, file_id, file_size,
+                               _archive_m.group(1), _archive_m.group(2),
+                               sender_id, target_chat_id)
+        return
+
     size_mb = file_size / (1024 * 1024)
     log(f"Document from {sender_id}: {file_name} ({size_mb:.1f} MB)")
     if size_mb > 20:
@@ -783,6 +791,231 @@ def handle_document(msg, target_chat_id=None):
                  f"类型: {'开发' if is_dev else '劫持'}\n"
                  f"data_date: <code>{data_date}</code>",
                  target_chat_id=target_chat_id)
+
+
+def _handle_archive_import(file_name, file_id, file_size, archive_type, archive_date,
+                            sender_id, target_chat_id):
+    """Import a comparison archive snapshot (.xlsx) into /data/comparison_archive/.
+
+    Strict requirements (ALL must pass):
+      - RAILWAY_SETUP_MODE=1
+      - Telegram private chat (enforced by caller)
+      - sender_id in ADMIN_TELEGRAM_IDS (enforced by caller)
+      - filename matches: development_YYYY-MM-DD.xlsx or hijack_YYYY-MM-DD.xlsx
+      - openpyxl can open the file
+      - internal data_date matches filename YYYY-MM-DD exactly
+      - no WRONG_DATE / WRONG_RANGE / quarantine files accepted
+
+    Dedup: SHA256 compare if target exists.
+      - same SHA → already_exists_same (skip)
+      - different SHA → conflict (reject)
+      - not exists → created
+
+    Never triggers: /compare, business push, auto-archive, active Excel replace.
+    """
+    import hashlib
+
+    # ── SETUP_MODE guard ──
+    try:
+        import _runtime as _rt_a
+        if not _rt_a.is_setup_mode():
+            send_message("❌ Archive 导入仅在 SETUP_MODE 下可用\n"
+                         "当前 RAILWAY_SETUP_MODE ≠ 1",
+                         target_chat_id=target_chat_id)
+            return
+    except ImportError:
+        send_message("❌ 无法检测运行模式，导入已拒绝", target_chat_id=target_chat_id)
+        return
+
+    # ── Resolve archive directory ──
+    try:
+        archive_dir = _rt_a.archive_dir()
+    except Exception:
+        archive_dir = os.path.join(SCRIPT_DIR, "data", "comparison_archive")
+    os.makedirs(archive_dir, exist_ok=True)
+
+    dest_path = os.path.join(archive_dir, file_name)
+
+    # ── Download to temp ──
+    tmp_path = os.path.join(tempfile.gettempdir(),
+                            f".archive_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file_name}")
+    send_message(f"📥 正在接收 archive: {_esc_html(file_name)} ...", target_chat_id=target_chat_id)
+    saved, err = download_telegram_file(file_id, tmp_path)
+    if err or not saved or not os.path.isfile(tmp_path):
+        log(f"Archive import download failed: {err}")
+        send_message("❌ 下载失败，已清理临时文件", target_chat_id=target_chat_id)
+        _safe_remove(tmp_path)
+        return
+    try:
+        # ── openpyxl validate + detect internal data_date ──
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(tmp_path, data_only=True)
+            wb.close()
+        except Exception as e:
+            log(f"Archive import invalid xlsx: {e}")
+            send_message("❌ 文件不是有效的 xlsx，已拒绝", target_chat_id=target_chat_id)
+            return
+
+        import _platform_config as _pc
+        internal_date = _pc._detect_data_date(tmp_path)
+
+        if not internal_date:
+            log(f"Archive import: internal date not found (expected {archive_date})")
+            send_message(f"❌ 内部 data_date 不匹配\n"
+                         f"文件名日期: <code>{archive_date}</code>\n"
+                         f"内部日期: 未找到",
+                         target_chat_id=target_chat_id)
+            return
+
+        if internal_date != archive_date:
+            log(f"Archive import: date mismatch file={archive_date} internal={internal_date}")
+            send_message(f"❌ 内部 data_date 与文件名不一致\n"
+                         f"文件名日期: <code>{archive_date}</code>\n"
+                         f"内部日期: <code>{internal_date}</code>\n"
+                         f"拒绝导入（疑似 WRONG_DATE）",
+                         target_chat_id=target_chat_id)
+            return
+
+        # ── SHA256 + place ──
+        with open(tmp_path, "rb") as f:
+            src_sha = hashlib.sha256(f.read()).hexdigest()
+
+        if os.path.isfile(dest_path):
+            with open(dest_path, "rb") as f:
+                dst_sha = hashlib.sha256(f.read()).hexdigest()
+            if src_sha == dst_sha:
+                status = "already_exists_same"
+                log(f"Archive import: {file_name} already exists (same SHA)")
+                send_message(f"ℹ️ 快照已存在，内容相同\n"
+                             f"文件: <code>{_esc_html(file_name)}</code>\n"
+                             f"类型: {archive_type}\n"
+                             f"data_date: <code>{archive_date}</code>\n"
+                             f"大小: {file_size:,} bytes\n"
+                             f"SHA256: <code>{src_sha[:12]}</code>\n"
+                             f"状态: <b>already_exists_same</b>",
+                             target_chat_id=target_chat_id)
+            else:
+                status = "conflict"
+                log(f"Archive import: {file_name} CONFLICT (SHA differs)")
+                send_message(f"🚫 快照冲突 — 拒绝覆盖\n"
+                             f"文件: <code>{_esc_html(file_name)}</code>\n"
+                             f"类型: {archive_type}\n"
+                             f"data_date: <code>{archive_date}</code>\n"
+                             f"大小: {file_size:,} bytes\n"
+                             f"源 SHA256: <code>{src_sha[:12]}</code>\n"
+                             f"目标 SHA256: <code>{dst_sha[:12]}</code>\n"
+                             f"状态: <b>conflict</b>",
+                             target_chat_id=target_chat_id)
+        else:
+            shutil.move(tmp_path, dest_path)
+            status = "created"
+            log(f"Archive import: {file_name} created SHA={src_sha[:12]}")
+            send_message(f"✅ 快照已归档\n"
+                         f"文件: <code>{_esc_html(file_name)}</code>\n"
+                         f"类型: {archive_type}\n"
+                         f"data_date: <code>{archive_date}</code>\n"
+                         f"大小: {file_size:,} bytes\n"
+                         f"SHA256: <code>{src_sha[:12]}</code>\n"
+                         f"状态: <b>created</b>",
+                         target_chat_id=target_chat_id)
+    finally:
+        _safe_remove(tmp_path)
+
+
+def _archive_status_cmd(target_chat_id=None):
+    """Admin command: /archive_status — show comparison_archive inventory.
+    Uses active Excel data_date (NOT datetime.now()) as comparison baseline."""
+    import _runtime as _rt_a
+    from datetime import datetime, timedelta
+
+    try:
+        archive_dir = _rt_a.archive_dir()
+    except Exception:
+        archive_dir = os.path.join(SCRIPT_DIR, "data", "comparison_archive")
+
+    if not os.path.isdir(archive_dir):
+        send_message("📂 comparison_archive 目录不存在", target_chat_id=target_chat_id)
+        return
+
+    all_files = sorted([f for f in os.listdir(archive_dir)
+                        if f.endswith('.xlsx') and not f.startswith('.')])
+
+    dev_files = [f for f in all_files if f.startswith("development_")]
+    hij_files = [f for f in all_files if f.startswith("hijack_")]
+    other_files = [f for f in all_files
+                   if not f.startswith("development_") and not f.startswith("hijack_")]
+
+    # Quarantine
+    quar_dir = os.path.join(archive_dir, "quarantine")
+    quar_files = []
+    if os.path.isdir(quar_dir):
+        quar_files = sorted([f for f in os.listdir(quar_dir) if f.endswith('.xlsx')])
+
+    lines = ["📂 **comparison_archive 状态**\n"]
+
+    # ── Helper: compute yesterday & last-month-same-day from a data_date ──
+    def _calc_targets(data_date_str):
+        """Given 'YYYY-MM-DD', return (yesterday_str, last_month_same_day_str)."""
+        dt = datetime.strptime(data_date_str, '%Y-%m-%d')
+        yesterday = dt - timedelta(days=1)
+        yday = yesterday.strftime('%Y-%m-%d')
+        # Last month same day
+        if dt.month == 1:
+            lm = dt.replace(year=dt.year - 1, month=12)
+        else:
+            lm = dt.replace(month=dt.month - 1)
+        try:
+            lm_same = lm.replace(day=dt.day)
+        except ValueError:
+            lm_same = lm.replace(day=28)
+        return yday, lm_same.strftime('%Y-%m-%d')
+
+    # ── Per-kind builder ──
+    def _kind_section(kind, label, archive_files):
+        """Build lines for one kind (development/hijack)."""
+        sec = [f"**【{label}】**"]
+        import _platform_config as _pc
+
+        # Resolve active Excel data_date
+        active_path, active_fname, active_dd, active_errs = _pc.get_active_excel(kind)
+        if active_dd:
+            sec.append(f"当前 data_date: <code>{active_dd}</code>")
+            yday, lm_day = _calc_targets(active_dd)
+            target_yday = f"{kind}_{yday}.xlsx"
+            target_lm = f"{kind}_{lm_day}.xlsx"
+            sec.append(f"昨日目标 ({yday}): {'✅' if target_yday in all_files else '❌ 缺失'}")
+            sec.append(f"上月同日 ({lm_day}): {'✅' if target_lm in all_files else '❌ 缺失'}")
+            sec.append(f"快照数量: {len(archive_files)} 份")
+            if archive_files:
+                first = archive_files[0].replace(f"{kind}_", "").replace(".xlsx", "")
+                last = archive_files[-1].replace(f"{kind}_", "").replace(".xlsx", "")
+                sec.append(f"范围: {first} → {last}")
+        elif active_errs:
+            sec.append(f"⚠️ 无法识别 data_date: {active_errs[0] if active_errs else '未知错误'}")
+        else:
+            sec.append("⚠️ 无法识别 data_date（未找到 active Excel）")
+        return sec
+
+    lines.extend(_kind_section("development", "Development", dev_files))
+    lines.append("")
+    lines.extend(_kind_section("hijack", "Hijack", hij_files))
+
+    # Other / anomaly files
+    if other_files:
+        lines.append(f"\n⚠️ 非标准文件 ({len(other_files)}):")
+        for of in other_files[:10]:
+            op = os.path.join(archive_dir, of)
+            size = os.path.getsize(op) if os.path.isfile(op) else 0
+            lines.append(f"  {of} ({size:,} bytes)")
+
+    if quar_files:
+        lines.append(f"\n🔒 Quarantine ({len(quar_files)}):")
+        for qf in quar_files[:5]:
+            qp = os.path.join(quar_dir, qf)
+            lines.append(f"  {qf} ({os.path.getsize(qp):,} bytes)")
+
+    send_message("\n".join(lines), target_chat_id=target_chat_id)
 
 
 def _safe_remove(path):
@@ -1210,6 +1443,7 @@ def main():
                         "/data_status", "/数据状态",
                         "/snapshot_check", "/快照检查",
                         "/compare_check", "/对比检查",
+                        "/archive_status", "/归档状态",
                     }
                     _cmd_raw = text.split()[0].lower().split("@")[0] if text else ""
                     chat_id = chat.get("id")
@@ -1524,6 +1758,21 @@ def main():
                         except Exception as e:
                             log(f"Compare check error: {e}")
                             send_message(f"❌ 状态检查失败: {e}", target_chat_id=reply_chat_id)
+
+                    elif cmd in ("/archive_status", "/归档状态"):
+                        sender_id = str(msg.get("from", {}).get("id", ""))
+                        admin_ids = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
+                        if not admin_ids:
+                            send_message("❌ 管理员名单未配置，此功能已禁用",
+                                         target_chat_id=reply_chat_id); continue
+                        if sender_id not in admin_ids:
+                            send_message("❌ 权限不足，仅管理员可执行",
+                                         target_chat_id=reply_chat_id); continue
+                        try:
+                            _archive_status_cmd(target_chat_id=reply_chat_id)
+                        except Exception as e:
+                            log(f"Archive status error: {e}")
+                            send_message(f"❌ Archive 状态检查失败: {e}", target_chat_id=reply_chat_id)
 
                     elif cmd in ("/compare", "/数据对比"):
                         sender_id = str(msg.get("from", {}).get("id", ""))

@@ -1467,6 +1467,18 @@ def main():
                     )
 
                     if not is_target_group and not is_private_admin_command and not is_setup_admin_upload:
+                        # ── Explicit denial: admin push commands in private chat ──
+                        _PUSH_COMMANDS = {"/compare", "/compare_date", "/数据对比", "/指定对比"}
+                        if chat_type == "private" and _cmd_raw in _PUSH_COMMANDS:
+                            sender_id_priv = str(msg.get("from", {}).get("id", ""))
+                            try:
+                                admins_priv = [str(a) for a in (_plat_cfg.get_admin_ids() if _plat_cfg else [])]
+                            except Exception:
+                                admins_priv = []
+                            if admins_priv and sender_id_priv in admins_priv:
+                                send_message("⚠️ 此命令仅允许在目标业务群中使用\n请切换到业务群发送",
+                                             target_chat_id=chat_id)
+                                continue
                         continue
 
                     # Replies for private chat go back to the private chat;

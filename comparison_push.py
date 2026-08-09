@@ -453,29 +453,22 @@ def generate_comparison(target_date_str=None):
         month_label = _date_label(prev_month_dt.strftime('%Y-%m-%d'))
 
     else:
-        # /compare mode: resolve live file via active_month.json first
+        # /compare mode: resolve live file via active_month.json (no directory-scan fallback)
         import _platform_config as _pcfg
         _am_path, _am_name, _am_date, _am_errs = _pcfg.get_active_excel("development")
-        if _am_path:
-            live_path = _am_path
-        else:
-            live_path = _find_latest(DATA_FOLDER, "线上办公数据汇总", "劫持")
-        if not live_path:
-            return False, "未找到当前实时开发Excel", [], ""
-
-        cur_date = _read_internal_date(live_path)
-        if not cur_date:
-            return False, "无法读取实时Excel内部日期", [], ""
+        if not _am_path or not _am_date:
+            _err_msg = _am_errs[0] if _am_errs else "未找到当前 Active Excel（检查 active_month.json）"
+            return False, f"Development: {_err_msg}", [], ""
+        live_path = _am_path
+        cur_date = _am_date
 
         # Snapshot live file
         _snapshot(live_path, "development")
         _hij_path, _hij_name, _hij_date, _hij_errs = _pcfg.get_active_excel("hijack")
-        if _hij_path:
-            hij_path = _hij_path
-        else:
-            hij_path = _find_latest(DATA_FOLDER, "劫持（线上办公数据汇总）")
-        if hij_path:
-            _snapshot(hij_path, "hijack")
+        if _hij_path and _hij_date:
+            _snapshot(_hij_path, "hijack")
+        elif _hij_errs:
+            log(f"Hijack snapshot skipped: {_hij_errs[0]}")
 
         cur_path = live_path
         try:
@@ -642,28 +635,32 @@ def check_comparison_status():
     Returns formatted text for /compare_check."""
     lines = ["📊 数据对比状态检查", ""]
 
-    # ── Realtime files ──
+    # ── Realtime files (via active_month.json, NOT directory scan) ──
+    import _platform_config as _pcfg
     lines.append("【实时文件】")
-    dev_path = _find_latest(DATA_FOLDER, "线上办公数据汇总", "劫持")
-    hij_path = _find_latest(DATA_FOLDER, "劫持（线上办公数据汇总）")
 
-    dev_date = _read_internal_date(dev_path) if dev_path else None
-    hij_date = _read_internal_date(hij_path) if hij_path else None
+    dev_path, dev_fname, dev_date, dev_errs = _pcfg.get_active_excel("development")
+    hij_path, hij_fname, hij_date, hij_errs = _pcfg.get_active_excel("hijack")
 
-    if dev_path:
-        lines.append(f"开发：{'✅' if dev_date else '❌ 无法识别日期'} {dev_date or ''}")
-        lines.append(f"路径：{dev_path}")
+    if dev_path and dev_date:
+        lines.append(f"开发：✅ {dev_date}")
+        lines.append(f"文件：{dev_fname}")
+    elif dev_errs:
+        lines.append(f"开发：❌ {dev_errs[0] if dev_errs else '未找到 Active Excel'}")
     else:
-        lines.append("开发：❌ 未找到实时文件")
-    if hij_path:
-        lines.append(f"劫持：{'✅' if hij_date else '❌ 无法识别日期'} {hij_date or ''}")
-        lines.append(f"路径：{hij_path}")
+        lines.append("开发：❌ 无法识别 data_date")
+
+    if hij_path and hij_date:
+        lines.append(f"劫持：✅ {hij_date}")
+        lines.append(f"文件：{hij_fname}")
+    elif hij_errs:
+        lines.append(f"劫持：❌ {hij_errs[0] if hij_errs else '未找到 Active Excel'}")
     else:
-        lines.append("劫持：❌ 未找到实时文件")
+        lines.append("劫持：❌ 无法识别 data_date")
 
     if not dev_date:
         lines.append("")
-        lines.append("❌ 无法识别实时Excel实际数据截止日期")
+        lines.append("❌ 无法识别开发实时Excel实际数据截止日期")
         return "\n".join(lines)
 
     # ── Default /compare ──

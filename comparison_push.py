@@ -20,7 +20,7 @@ import openpyxl
 with open(os.path.join(SCRIPT_DIR, "config.json"), "r", encoding="utf-8") as f:
     CFG = json.load(f)
 
-DATA_FOLDER = CFG.get("data_folder", SCRIPT_DIR)
+DATA_FOLDER = _runtime.excel_dir() if _runtime else CFG.get("data_folder", SCRIPT_DIR)
 ARCHIVE_DIR = _runtime.archive_dir() if _runtime else os.path.join(SCRIPT_DIR, "data", "comparison_archive")
 GEN_DIR = _runtime.generated_dir() if _runtime else os.path.join(SCRIPT_DIR, "data", "generated")
 os.makedirs(ARCHIVE_DIR, exist_ok=True)

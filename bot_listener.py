@@ -252,7 +252,8 @@ def _send_hijack_comparison(target_date=None, dry_run=False):
         if not dry_run: send_message(f"PH33对比生成失败: {err}")
         return result
 
-    fpath = os.path.join(SCRIPT_DIR, 'data', 'generated', f'hijack_compare_{target_date}.png')
+    import _runtime as _rt_h
+    fpath = os.path.join(_rt_h.generated_dir(), f'hijack_compare_{target_date}.png')
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     with open(fpath, 'wb') as f: f.write(img_bytes)
 
@@ -471,7 +472,8 @@ def run_hijack_push(mode="data", dry_run=False, target_date=None):
                         base_result["archive_error"] = f"expected={target_date} actual={data_date}"
                         log(f"PH33 archive failed: data_date mismatch target={target_date} actual={data_date}")
                     else:
-                        archive_dest = os.path.join(SCRIPT_DIR, "data", "comparison_archive",
+                        import _runtime as _rt_ar
+                        archive_dest = os.path.join(_rt_ar.archive_dir(),
                                                     f"hijack_{data_date}.xlsx")
                         os.makedirs(os.path.dirname(archive_dest), exist_ok=True)
                         base_result["archive_path"] = archive_dest

@@ -28,9 +28,6 @@ PUSH_EN_SCRIPT = os.path.join(SCRIPT_DIR, "push_update_en.py")
 LOG_FILE = os.path.join(SCRIPT_DIR, "bot_log.txt")
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "bot_listener_lock.txt")
 HEARTBEAT_FILE = os.path.join(tempfile.gettempdir(), "bot_heartbeat.txt")
-LAST_PUSH_DATE_FILE = os.path.join(SCRIPT_DIR, "_last_auto_push.txt")
-LAST_WEEKLY_DATE_FILE = os.path.join(SCRIPT_DIR, "_last_weekly_push.txt")
-LAST_MONTHLY_DATE_FILE = os.path.join(SCRIPT_DIR, "_last_monthly_push.txt")
 sys.path.insert(0, SCRIPT_DIR)
 try:
     import _bot_data
@@ -44,6 +41,17 @@ try:
 except ImportError as e:
     _plat_cfg = None
     print(f"Warning: _platform_config not available: {e}")
+
+# ── State directory (marker files): Railway → /data (Volume), Windows → SCRIPT_DIR ──
+try:
+    import _runtime as _rt_state
+    _STATE_DIR = _rt_state.resolve_data_root() if _rt_state.is_railway() else SCRIPT_DIR
+except ImportError:
+    _STATE_DIR = SCRIPT_DIR
+
+LAST_PUSH_DATE_FILE = os.path.join(_STATE_DIR, "_last_auto_push.txt")
+LAST_WEEKLY_DATE_FILE = os.path.join(_STATE_DIR, "_last_weekly_push.txt")
+LAST_MONTHLY_DATE_FILE = os.path.join(_STATE_DIR, "_last_monthly_push.txt")
 
 
 def acquire_lock():
@@ -90,12 +98,24 @@ def write_heartbeat():
         pass
 
 
+def _business_now():
+    """Return current datetime in business timezone (UTC+8).
+    Primary: ZoneInfo('Asia/Manila'). Fallback: UTC + 8h (never depends on local TZ)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("Asia/Manila"))
+    except Exception:
+        from datetime import timezone, timedelta as _td
+        return datetime.now(timezone.utc).astimezone(timezone(_td(hours=8)))
+
+
 def check_scheduled_push():
-    """Check if it's time for the daily/weekly/monthly scheduled push. Returns True if any push was done."""
+    """Check if it's time for the daily/weekly/monthly scheduled push. Returns True if any push was done.
+    All time comparisons use business timezone (UTC+8), NOT server local time."""
     try:
         cfg = load_config()
         push_time = cfg.get("schedule", {}).get("daily_push_time", "21:07")
-        now = datetime.now()
+        now = _business_now()
         current_time = now.strftime("%H:%M")
         today = now.strftime("%Y-%m-%d")
 

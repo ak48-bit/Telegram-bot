@@ -1,5 +1,5 @@
 ﻿import os, json, urllib.request, re
-from datetime import datetime
+from datetime import datetime, timedelta
 import openpyxl
 from PIL import Image, ImageDraw, ImageFont
 
@@ -216,40 +216,42 @@ def read_platform_data(ws, target_date=None):
 
 
 def read_platform_prev(ws, target_date=None):
+    """Read the day BEFORE target_date. Exact date match via _find_data_row_by_date.
+    Never scans from template tail rows when an explicit date is known."""
     if target_date:
-        current = _find_data_row_by_date(ws, target_date)
-        if current is None:
+        try:
+            td = datetime.strptime(target_date, "%Y-%m-%d")
+            prev_date_str = (td - timedelta(days=1)).strftime("%Y-%m-%d")
+        except Exception:
             return None
-        # Try previous row with data
-        for row_idx in range(current - 1, 5, -1):
-            date_val = ws.cell(row=row_idx, column=1).value
-            ftd_val = ws.cell(row=row_idx, column=8).value
-            if date_val is not None and hasattr(date_val, 'strftime') and ftd_val is not None:
-                try:
-                    float(ftd_val)
-                    return _build_dict(ws, row_idx)
-                except (ValueError, TypeError):
-                    continue
+        prev_row = _find_data_row_by_date(ws, prev_date_str)
+        if prev_row is None:
+            return None
+        return _build_dict(ws, prev_row)
+    # No explicit date: legacy behavior (last data row scan)
+    latest = _find_last_data_row(ws)
+    if latest is None:
         return None
+    for row_idx in range(latest - 1, 5, -1):
+        date_val = ws.cell(row=row_idx, column=1).value
+        ftd_val = ws.cell(row=row_idx, column=8).value
+        if date_val is not None and hasattr(date_val, 'strftime') and ftd_val is not None:
+            try:
+                float(ftd_val)
+                return _build_dict(ws, row_idx)
+            except (ValueError, TypeError):
+                continue
+    return None
+
+
+def read_platform_monthly(ws, end_date=None):
+    """Sum all daily rows for month-to-date cumulative totals.
+    end_date: explicit cutoff date (e.g. Active Excel data_date).
+    Without end_date, falls back to last-data-row scan (legacy)."""
+    if end_date:
+        latest = _find_data_row_by_date(ws, end_date)
     else:
         latest = _find_last_data_row(ws)
-        if latest is None:
-            return None
-        for row_idx in range(latest - 1, 5, -1):
-            date_val = ws.cell(row=row_idx, column=1).value
-            ftd_val = ws.cell(row=row_idx, column=8).value
-            if date_val is not None and hasattr(date_val, 'strftime') and ftd_val is not None:
-                try:
-                    float(ftd_val)
-                    return _build_dict(ws, row_idx)
-                except (ValueError, TypeError):
-                    continue
-        return None
-
-
-def read_platform_monthly(ws):
-    """Sum all daily rows for month-to-date cumulative totals."""
-    latest = _find_last_data_row(ws)
     if latest is None:
         return None
     c = lambda row, col: _cell_float(ws, row, col)
@@ -283,9 +285,13 @@ def read_platform_monthly(ws):
     return latest_d
 
 
-def read_platform_monthly_full(ws):
-    """Sum all daily rows for month-to-date, returning full 28-column data."""
-    latest = _find_last_data_row(ws)
+def read_platform_monthly_full(ws, end_date=None):
+    """Sum all daily rows for month-to-date, returning full 28-column data.
+    end_date: explicit cutoff date (e.g. Active Excel data_date)."""
+    if end_date:
+        latest = _find_data_row_by_date(ws, end_date)
+    else:
+        latest = _find_last_data_row(ws)
     if latest is None:
         return None
     c = lambda row, col: _cell_float(ws, row, col)
@@ -2239,14 +2245,25 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
         use_last_row = False
 
     # Resolve development file via active_month.json first
+    dev_data_date = None
+    hijack_data_date = None
     try:
         _am_path, _am_name, _am_date, _am_errs = _plat.get_active_excel("development")
+        if _am_date:
+            dev_data_date = _am_date
         if _am_path and not target_date and not target_month:
             excel_file = _am_path
         else:
             excel_file = find_monthly_file(resolve_date, ["线上办公数据汇"], exclude_kw=["劫持"])
     except Exception:
         excel_file = find_monthly_file(resolve_date, ["线上办公数据汇"], exclude_kw=["劫持"])
+    # Resolve hijack data_date independently
+    try:
+        _hj_path, _hj_name, _hj_date, _hj_errs = _plat.get_active_excel("hijack")
+        if _hj_date:
+            hijack_data_date = _hj_date
+    except Exception:
+        pass
     hj_office_file = find_monthly_file(resolve_date, ["劫持", "办公数据汇总"], exclude_kw=["人事"])
     hj_hr_file = find_monthly_file(resolve_date, ["劫持", "人事数据汇总"])
 
@@ -2281,31 +2298,42 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
             d["online"] = headcount.get(name, {}).get("online", 0)
             today[name] = d
         # Get dates from individual sheets (当日汇总 doesn't have dates)
+        # Prefer Active Excel data_date; fallback to sheet scan only without explicit date
         for name in ALL_PLATFORMS:
+            if name not in today:
+                continue
+            if dev_data_date:
+                try:
+                    today[name]["date"] = datetime.strptime(dev_data_date, "%Y-%m-%d")
+                except Exception:
+                    pass
+                continue
             if name in wb.sheetnames:
                 ws = wb[name]
-                # Find the latest date from individual sheets
+                # Find the latest date from individual sheets (legacy fallback)
                 row = _find_last_data_row(ws)
                 if row is not None:
                     dval = ws.cell(row=row, column=1).value
-                    if dval is not None and hasattr(dval, 'strftime') and name in today:
+                    if dval is not None and hasattr(dval, 'strftime'):
                         today[name]["date"] = dval
                         if latest_data_date is None:
                             latest_data_date = dval
 
     # Read yesterday (prev day) and monthly from individual sheets
+    # Explicit date precedence: target_date (user) → dev_data_date (Active Excel) → legacy scan
+    _eff_date = None if use_last_row else (target_date or dev_data_date)
     monthly_full = {}
     for name in ALL_PLATFORMS:
         if name in wb.sheetnames:
             ws = wb[name]
-            p = read_platform_prev(ws, None if use_last_row else target_date)
+            p = read_platform_prev(ws, _eff_date)
             if p:
                 yesterday[name] = p
-            m = read_platform_monthly(ws)
+            m = read_platform_monthly(ws, _eff_date)
             if m:
                 m["status"] = evaluate_status(m)
                 monthly[name] = m
-            mf = read_platform_monthly_full(ws)
+            mf = read_platform_monthly_full(ws, _eff_date)
             if mf:
                 mf["office"] = headcount.get(name, {}).get("office", 0)
                 mf["online"] = headcount.get(name, {}).get("online", 0)
@@ -2344,13 +2372,16 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
     elif resolve_date and hasattr(resolve_date, 'month') and resolve_date.month >= 3:
         hj_warnings.append("⚠️ 劫持人资文件未找到（3月起应有此数据）")
 
-    # Latest date / date range
-    dates = [d["date"] for d in today.values() if d.get("date")]
-    latest_date = "未知"
+    # Latest date / date range — prefer Active Excel data_date over sheet scan
+    if dev_data_date and not target_month:
+        latest_date = dev_data_date
+    else:
+        dates = [d["date"] for d in today.values() if d.get("date")]
+        latest_date = "未知"
+        if dates:
+            d0 = dates[0]
+            latest_date = d0.strftime("%Y-%m-%d") if hasattr(d0, 'strftime') else str(d0)[:10]
     date_label = "数据日期"
-    if dates:
-        d0 = dates[0]
-        latest_date = d0.strftime("%Y-%m-%d") if hasattr(d0, 'strftime') else str(d0)[:10]
     if target_month:
         # Show month range: e.g. "2026-04 (截至04-28)"
         date_label = "数据月份"
@@ -2358,7 +2389,13 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
             latest_date = f"{target_month} (截至{latest_date[-5:]})"
 
     prev_date = ""
-    if yesterday:
+    if latest_date != "未知":
+        try:
+            ld = datetime.strptime(latest_date, "%Y-%m-%d")
+            prev_date = (ld - __import__('datetime').timedelta(days=1)).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+    if not prev_date and yesterday:
         pd_dates = [d["date"] for d in yesterday.values() if d.get("date")]
         if pd_dates:
             pd0 = pd_dates[0]
@@ -2532,9 +2569,10 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
         content += f"- {line}\n"
 
     # ── HJ Office section (image-based, text summary only) ──
+    _hj_display_date = hijack_data_date or latest_date
     if hj_daily_summary:
         content += "\n## 劫持运营\n"
-        content += f"**{hj_daily_summary['platform']} | {latest_date}** — 当天FTD={hj_daily_summary['ftd']} 注册={hj_daily_summary['registrations']} 存提差={fmt_k_signed(hj_daily_summary['cumulative_diff'])} 净利润={fmt_k_signed(hj_daily_summary['net_profit'])}\n"
+        content += f"**{hj_daily_summary['platform']} | {_hj_display_date}** — 当天FTD={hj_daily_summary['ftd']} 注册={hj_daily_summary['registrations']} 存提差={fmt_k_signed(hj_daily_summary['cumulative_diff'])} 净利润={fmt_k_signed(hj_daily_summary['net_profit'])}\n"
         content += f"> 详情见劫持运营数据图\n"
 
     # ── HJ HR section ──
@@ -2666,15 +2704,15 @@ def generate_push(target_date=None, target_month=None, override_sections=None):
 
     # Image 9: HJ Daily Full (all 32 cols)
     if sections.get("hijack_office", True) and hj_daily_summary:
-        img_hj_daily = build_hj_daily_full_image(hj_daily_summary, latest_date)
+        img_hj_daily = build_hj_daily_full_image(hj_daily_summary, _hj_display_date)
         if img_hj_daily:
             photos_total += 1
-            if send_telegram_document(img_hj_daily, caption=f"劫持运营 — 当天数据汇总 | {latest_date}"):
+            if send_telegram_document(img_hj_daily, caption=f"劫持运营 — 当天数据汇总 | {_hj_display_date}"):
                 photos_sent += 1
 
     # Image 10: HJ Monthly Full (all 28 cols)
     if sections.get("hijack_office", True) and hj_monthly_summary:
-        img_hj_monthly = build_hj_monthly_full_image(hj_monthly_summary, latest_date)
+        img_hj_monthly = build_hj_monthly_full_image(hj_monthly_summary, _hj_display_date)
         if img_hj_monthly:
             photos_total += 1
             if send_telegram_document(img_hj_monthly, caption=f"劫持运营 — 当月数据汇总 | 5月"):
